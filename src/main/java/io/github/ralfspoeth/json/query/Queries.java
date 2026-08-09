@@ -67,6 +67,8 @@ public class Queries {
     /**
      * Same as {@code asObject(elem, true)}, kept mainly
      * for backward compatibility reasons
+     * @param elem a JSON value; may not be {@code null}
+     * @return a {@link Map}, {@link List} or a basic wrapper
      */
     public static @Nullable Object asObject(JsonValue elem) {
         return asObject(elem, true);
@@ -121,6 +123,8 @@ public class Queries {
     /**
      * Same as {@link #intArray(JsonValue)} but converting the elements of the
      * {@link JsonArray} into {@code long}s.
+     * @param elem an element, may be {@code null}
+     * @return an array of {@code long}s, never {@code null}; may have length 0
      */
     public static long[] longArray(@Nullable JsonValue elem) {
         return switch (elem) {

@@ -1,5 +1,8 @@
 import org.jspecify.annotations.NullMarked;
 
+/**
+ * The Greyson module which contains the JSON parser, serializer and querying library.
+ */
 @NullMarked
 module io.github.ralfspoeth.greyson {
     requires static org.jspecify;

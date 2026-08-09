@@ -170,12 +170,18 @@ public sealed abstract class Selector implements Function<JsonValue, Stream<Json
         return TypeSelector.AGGREGATE_SELECTOR;
     }
 
-    /** Yields its input if it is a {@link JsonArray}; empty stream otherwise. */
+    /**
+     * Yields its input if it is a {@link JsonArray}; empty stream otherwise.
+     * @return a selector
+     */
     public static Selector arrays() {
         return TypeSelector.ARRAY_SELECTOR;
     }
 
-    /** Yields its input if it is a {@link JsonObject}; empty stream otherwise. */
+    /**
+     * Yields its input if it is a {@link JsonObject}; empty stream otherwise.
+     * @return a selector
+     */
     public static Selector objects() {
         return TypeSelector.OBJECT_SELECTOR;
     }
@@ -246,6 +252,7 @@ public sealed abstract class Selector implements Function<JsonValue, Stream<Json
      * Same as {@code regex(Pattern.compile(regex));}
      *
      * @param regex the regular expression
+     * @return a selector
      */
     public static Selector regex(String regex) {
         return regex(Pattern.compile(regex));
