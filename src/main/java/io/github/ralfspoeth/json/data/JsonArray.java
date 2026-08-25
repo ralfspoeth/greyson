@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.IntFunction;
+import java.util.stream.Stream;
 
 import static io.github.ralfspoeth.json.data.Builder.arrayBuilder;
 import static java.util.stream.Collectors.joining;
@@ -45,6 +46,11 @@ public record JsonArray(List<JsonValue> elements) implements Aggregate, IntFunct
             ab.add(JsonValue.of(Array.get(o, i)));
         }
         return ab.build();
+    }
+
+    @Override
+    public Stream<JsonValue> values() {
+        return elements().stream();
     }
 
     @Override

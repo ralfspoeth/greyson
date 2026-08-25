@@ -5,6 +5,7 @@ import org.jspecify.annotations.Nullable;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 import static java.util.stream.Collectors.joining;
 import static java.util.stream.Collectors.toMap;
@@ -88,6 +89,11 @@ public record JsonObject(Map<String, JsonValue> members) implements Aggregate, F
     @Override
     public Optional<JsonValue> get(String key) {
         return Optional.ofNullable(members.get(key));
+    }
+
+    @Override
+    public Stream<JsonValue> values() {
+        return members().values().stream();
     }
 
     /**

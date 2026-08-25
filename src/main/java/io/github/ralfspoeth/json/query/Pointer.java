@@ -189,7 +189,9 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
                     : rebuilt;
         }
 
-        /** This segment rendered in {@link Pointer#parse(String)} syntax. */
+        /**
+         * This segment rendered in {@link Pointer#parse(String)} syntax.
+         */
         abstract String segment();
 
         @Override
@@ -607,7 +609,7 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
      * its {@code [n]} index marker; use {@code fromJsonPointer} to interoperate
      * with anything that emits RFC 6901 strings (JSON Patch, OpenAPI
      * {@code $ref}, JSON Schema, …).</p>
-     *
+     * <p>
      * {@snippet :
      * import io.github.ralfspoeth.json.Greyson;
      * var json = """
@@ -825,7 +827,7 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
      * <p>Dual of {@link Selector#point(Pointer)}: where {@code point} starts
      * from a stream and narrows each element to a single sub-value,
      * {@code select} starts from a single value and fans out.</p>
-     *
+     * <p>
      * {@snippet :
      * import java.util.stream.Stream;
      * JsonValue doc = null; // @replace regex="null;" replacement="..."
@@ -837,8 +839,8 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
      * @param selector a selector applied to whatever this pointer resolves to
      * @return a stream-shaped function suitable for {@link Stream#flatMap(Function)}
      */
-    public Function<JsonValue, Stream<JsonValue>> select(Selector selector) {
-        return v -> apply(v).stream().flatMap(selector);
+    public Selector select(Selector selector) {
+        return Selector.of(v -> apply(v).stream().flatMap(selector));
     }
 
     /**
@@ -851,13 +853,13 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
      * an {@link IllegalStateException}, and a {@code #regex} segment is not
      * writable ({@link UnsupportedOperationException}). Applying {@code with}
      * to {@link #self()} replaces the whole document.</p>
-     *
+     * <p>
      * {@snippet :
      * var p = Pointer.parse("data/users/[0]/name");
      * JsonValue updated = p.with(doc, Basic.of("Ada")); // doc unchanged
      *}
      *
-     * @param obj the document to copy from, may not be {@code null}
+     * @param obj         the document to copy from, may not be {@code null}
      * @param replacement the value to place at this pointer, may not be {@code null}
      * @return a new document reflecting the change
      */

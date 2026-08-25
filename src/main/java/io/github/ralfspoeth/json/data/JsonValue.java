@@ -5,6 +5,7 @@ import org.jspecify.annotations.Nullable;
 import java.math.BigDecimal;
 import java.util.*;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 /**
  * The root interface of the JSON hierarchy.
@@ -194,6 +195,10 @@ public sealed interface JsonValue extends Predicate<@Nullable JsonValue> permits
      */
     default Map<String, JsonValue> members() {
         return Map.of();
+    }
+
+    default Stream<JsonValue> values() {
+        return Stream.empty();
     }
 
     /**

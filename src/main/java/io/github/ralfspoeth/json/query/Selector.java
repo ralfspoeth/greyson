@@ -41,9 +41,11 @@ import static java.util.Objects.requireNonNull;
  *       {@link #strings()}, {@link #numbers()}, {@link #booleans()},
  *       {@link #nulls()}, plus the abstract supertypes {@link #basics()}
  *       and {@link #aggregates()}.</li>
- *   <li><b>Composition</b> &mdash; {@link #point(Pointer)} narrows each
- *       value in the stream to a sub-value via a pointer; this is the
- *       dual of {@link Pointer#select(Selector)}.</li>
+ *   <li><b>Composition</b> &mdash; {@link #point(Pointer)} narrows each value
+ *       in the stream to a sub-value via a pointer (the dual of
+ *       {@link Pointer#select(Selector)}); {@link #presentValues(Function)}
+ *       extracts a typed value from each selected value and drops the absent
+ *       ones, yielding a {@code Stream<T>}.</li>
  * </ul>
  *
  * <p>Selector instances are immutable and safe to share across threads;
@@ -61,6 +63,10 @@ public sealed abstract class Selector implements Function<JsonValue, Stream<Json
                     elements.stream() :
                     Stream.of(jsonValue);
         }
+    }
+
+    public <T> Function<JsonValue, Stream<T>> presentValues(Function<JsonValue, Optional<T>> f) {
+        return v -> apply(v).map(f).filter(Optional::isPresent).map(Optional::get);
     }
 
     /**
@@ -207,6 +213,21 @@ public sealed abstract class Selector implements Function<JsonValue, Stream<Json
     }
 
 
+    private static final class FunctionWrapper extends Selector {
+        private final Function<JsonValue, Stream<JsonValue>> function;
+        private FunctionWrapper(Function<JsonValue, Stream<JsonValue>> function) {
+            this.function = requireNonNull(function);
+        }
+        @Override
+        public Stream<JsonValue> apply(JsonValue elem) {
+            return function.apply(elem);
+        }
+    }
+
+
+    static Selector of(Function<JsonValue, Stream<JsonValue>> selector) {
+        return new FunctionWrapper(selector);
+    }
 
 
     /**
@@ -294,7 +315,7 @@ public sealed abstract class Selector implements Function<JsonValue, Stream<Json
      * @param p a pointer applied to each value this selector produces
      * @return a stream-shaped function suitable for {@link Stream#flatMap(Function)}
      */
-    public Function<? super JsonValue, Stream<JsonValue>> point(Pointer p) {
-        return v -> apply(v).flatMap(x -> p.apply(x).stream());
+    public Selector point(Pointer p) {
+        return of(v -> apply(v).flatMap(x -> p.apply(x).stream()));
     }
 }
