@@ -53,27 +53,25 @@ public sealed interface JsonValue extends Predicate<@Nullable JsonValue> permits
     String json();
 
     /**
-     * The depth of tree of nested values.
-     * The depth of each leaf node is 1.
-     * The depth of container nodes is 1 + the maximum depth of its children.
+     * The depth of the tree of nested values: {@code 1} for a leaf, and
+     * {@code 1 +} the maximum {@link #depth()} of its {@link #children()} for a
+     * container. Defined generically via {@code children()}, so the one
+     * implementation holds for every {@link JsonValue}.
      * @return the depth
      */
     default int depth() {
-        return 1;
+        return 1 + children().mapToInt(JsonValue::depth).max().orElse(0);
     }
 
     /**
-     * Recursively collect the number of nodes including {@code this}
-     * and the children.
-     * The result is 1 for all {@link Basic} nodes.
-     * For a {@link JsonArray}, it is 1 + the sum of the number of nodes
-     * of each if its {@link JsonArray#elements()}.
-     * For a {@link JsonObject}, it is 1 + the sum of the nodes of the
-     * {@link Map#values() values} of its {@link JsonObject#members()}.
+     * The number of nodes in this subtree, counting {@code this}: {@code 1} for
+     * a leaf (any {@link Basic}), and {@code 1 +} the sum of the {@link #nodes()}
+     * of its {@link #children()} for a container. Defined generically via
+     * {@code children()}.
      * @return the number of nodes contained in this subtree
      */
     default int nodes() {
-        return 1;
+        return 1 + children().mapToInt(JsonValue::nodes).sum();
     }
 
     /**
@@ -197,7 +195,15 @@ public sealed interface JsonValue extends Predicate<@Nullable JsonValue> permits
         return Map.of();
     }
 
-    default Stream<JsonValue> values() {
+    /**
+     * Stream the immediate children of this element: the
+     * {@link JsonArray#elements() elements} of a {@link JsonArray}, or the
+     * {@link JsonObject#members() member values} (not the keys) of a
+     * {@link JsonObject}. {@link Basic} values have no children, so the stream
+     * is empty. Always descends exactly one level — it never yields {@code this}.
+     * @return the direct children, or an empty stream for scalars
+     */
+    default Stream<JsonValue> children() {
         return Stream.empty();
     }
 

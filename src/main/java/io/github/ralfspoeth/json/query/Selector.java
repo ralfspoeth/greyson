@@ -65,10 +65,6 @@ public sealed abstract class Selector implements Function<JsonValue, Stream<Json
         }
     }
 
-    public <T> Function<JsonValue, Stream<T>> presentValues(Function<JsonValue, Optional<T>> f) {
-        return v -> apply(v).map(f).filter(Optional::isPresent).map(Optional::get);
-    }
-
     /**
      * Every {@code Selector} starts with this special selector
      * which creates a stream of the elements of a {@link JsonArray}
@@ -317,5 +313,32 @@ public sealed abstract class Selector implements Function<JsonValue, Stream<Json
      */
     public Selector point(Pointer p) {
         return of(v -> apply(v).flatMap(x -> p.apply(x).stream()));
+    }
+
+    /**
+     * Compose this selector with an {@code Optional}-returning extractor: apply
+     * this selector to fan out into a stream, map each value with {@code f}, and
+     * keep only the results that are {@linkplain Optional#isPresent() present}.
+     *
+     * <p>This is the multi-value analogue of {@link Pointer#as(Function, Function)}:
+     * it folds the usual {@code flatMap(v -> f.apply(v).stream())} bridge into a
+     * single step and exits the {@code JsonValue} world into a {@code Stream<T>}.</p>
+     *
+     * {@snippet :
+     * import io.github.ralfspoeth.json.query.Pointer;
+     * import java.util.stream.Stream;
+     * JsonValue doc = null; // @replace regex="null;" replacement="..."
+     * // every session's "id" string, absent ones skipped
+     * var ids = Pointer.parse("sessions").select(Selector.all())
+     *         .presentValues(s -> Pointer.parse("id").stringValue(s));
+     * Stream.of(doc).flatMap(ids).forEach(System.out::println);
+     *}
+     *
+     * @param f   an extractor mapping each selected value to an optional result
+     * @param <T> the type of the extracted values
+     * @return a stream-shaped function suitable for {@link Stream#flatMap(Function)}
+     */
+    public <T> Function<JsonValue, Stream<T>> presentValues(Function<JsonValue, Optional<T>> f) {
+        return v -> apply(v).map(f).filter(Optional::isPresent).map(Optional::get);
     }
 }

@@ -225,5 +225,33 @@ class SelectorTest {
         assertEquals(List.of(1, 2, 3), as);
     }
 
+    @Test
+    void presentValues() {
+        // [{"id":"a"}, {"x":1}, {"id":"c"}] — the middle object has no "id"
+        var arr = arrayBuilder()
+                .add(objectBuilder().putBasic("id", "a"))
+                .add(objectBuilder().putBasic("x", 1))
+                .add(objectBuilder().putBasic("id", "c"))
+                .build();
+        // fan out, extract the "id" string, drop the absent one
+        var ids = all().presentValues(v -> self().member("id").stringValue(v)).apply(arr).toList();
+        assertEquals(List.of("a", "c"), ids);
+    }
 
+    @Test
+    void selectThenPresentValues() {
+        // {"users": [{"email":"a@x"}, {"n":1}, {"email":"c@z"}]}
+        var doc = objectBuilder()
+                .put("users", arrayBuilder()
+                        .add(objectBuilder().putBasic("email", "a@x"))
+                        .add(objectBuilder().putBasic("n", 1))
+                        .add(objectBuilder().putBasic("email", "c@z")))
+                .build();
+        // pointer navigates, select fans out, presentValues extracts + drops absent
+        var emails = self().member("users").select(all())
+                .presentValues(v -> self().member("email").stringValue(v))
+                .apply(doc)
+                .toList();
+        assertEquals(List.of("a@x", "c@z"), emails);
+    }
 }

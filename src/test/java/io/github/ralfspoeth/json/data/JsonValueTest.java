@@ -290,4 +290,38 @@ class JsonValueTest {
                 () -> assertInstanceOf(JsonObject.class, JsonValue.of(m))
         );
     }
+
+    @Test
+    void children() {
+        var arr = arrayBuilder().addBasic(1).addBasic(2).addBasic(3).build();
+        var obj = objectBuilder().putBasic("a", 1).putBasic("b", 2).build();
+        assertAll(
+                // an array streams its elements, in order
+                () -> assertEquals(List.of(Basic.of(1), Basic.of(2), Basic.of(3)),
+                        arr.children().toList()),
+                // an object streams its member values (not the keys), order unspecified
+                () -> assertEquals(2L, obj.children().count()),
+                () -> assertTrue(obj.children().toList()
+                        .containsAll(List.of(Basic.of(1), Basic.of(2)))),
+                // scalars have no children
+                () -> assertEquals(0L, Basic.of("x").children().count()),
+                () -> assertEquals(0L, JsonNull.INSTANCE.children().count())
+        );
+    }
+
+    @Test
+    void depthAndNodesViaChildren() {
+        // {"a": [1, 2], "b": {"c": 3}}  -> depth 3; nodes 6
+        // (the root, the array, 1, 2, the inner object, and 3 — keys aren't nodes)
+        var doc = objectBuilder()
+                .put("a", arrayBuilder().addBasic(1).addBasic(2))
+                .put("b", objectBuilder().putBasic("c", 3))
+                .build();
+        assertAll(
+                () -> assertEquals(3, doc.depth()),
+                () -> assertEquals(6, doc.nodes()),
+                () -> assertEquals(1, Basic.of(1).depth()),
+                () -> assertEquals(1, Basic.of(1).nodes())
+        );
+    }
 }

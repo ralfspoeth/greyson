@@ -26,7 +26,7 @@ public class GreysonWay {
                     .flatMap(v -> v.get("properties"))   // Optional<JsonValue>
                     .flatMap(v -> v.get("periods"))      // Optional<JsonValue>
                     .stream()                                      // Stream<JsonValue>, 0 or 1
-                    .flatMap(JsonValue::values)                    // Stream<JsonValue>, many
+                    .flatMap(JsonValue::children)                    // Stream<JsonValue>, many
                     .map(JsonValue::decimal)                       // Optional<BigDecimal>
                     .filter(Optional::isPresent)                   // filter only if present
                     .map(Optional::get)                            // ...and get contents

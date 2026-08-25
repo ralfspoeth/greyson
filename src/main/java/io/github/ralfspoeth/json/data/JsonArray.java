@@ -49,7 +49,7 @@ public record JsonArray(List<JsonValue> elements) implements Aggregate, IntFunct
     }
 
     @Override
-    public Stream<JsonValue> values() {
+    public Stream<JsonValue> children() {
         return elements().stream();
     }
 
@@ -63,19 +63,6 @@ public record JsonArray(List<JsonValue> elements) implements Aggregate, IntFunct
     @Override
     public int size() {
         return elements.size();
-    }
-
-    @Override
-    public int nodes() {
-        return 1 + elements.stream().mapToInt(JsonValue::nodes).sum();
-    }
-
-    @Override
-    public int depth() {
-        return elements.stream()
-                .mapToInt(JsonValue::depth)
-                .max()
-                .orElse(0) + 1;
     }
 
     @Override

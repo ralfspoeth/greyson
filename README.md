@@ -6,7 +6,7 @@ A small, opinionated JSON library for Java.
 <dependency>
     <groupId>io.github.ralfspoeth</groupId>
     <artifactId>json</artifactId>
-    <version>1.6.1</version>
+    <version>1.7.0</version>
 </dependency>
 ```
 
@@ -406,8 +406,21 @@ isn't, the simplicity is worth the trade.
 
 ---
 
-## What's new in 1.6.1
+## What's new in 1.7.0
 
+- `JsonValue.children()` streams a container's immediate children — the elements
+  of an array or the member values of an object (not the keys), empty for scalars
+  — giving one uniform way to descend a single level without an `instanceof`
+  ladder. `depth()` and `nodes()` are now defined once, generically, on top of it
+  (the per-type overrides are gone).
+- `Selector.presentValues(f)` fans out and applies an `Optional`-returning
+  extractor to each value, keeping the present results as a `Stream<T>` — folding
+  the `flatMap(v -> f.apply(v).stream())` bridge into a single step. It's the
+  multi-value analogue of `Pointer.as`.
+- `Pointer.select(Selector)` now returns a `Selector` (previously a bare
+  `Function`), so pointer navigation chains fluently into further selector
+  operations, e.g. `parse("users").select(all()).presentValues(...)`.
+  Source-compatible, but recompile-required.
 - `JsonNumber` now preserves a number's scale exactly as written rather than
   stripping trailing zeros, so `18250.00` round-trips as `18250.00` (not
   `18250`). Equality stays *numeric* — `18250.00` equals `18250` via

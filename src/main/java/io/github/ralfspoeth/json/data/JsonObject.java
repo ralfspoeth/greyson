@@ -49,27 +49,6 @@ public record JsonObject(Map<String, JsonValue> members) implements Aggregate, F
     }
 
     /**
-     * The depth of a JSON object is 1 plus
-     * the maximum depth of the values in the member map.
-     */
-    @Override
-    public int depth() {
-        return members.values()
-                .stream()
-                .mapToInt(JsonValue::depth)
-                .max()
-                .orElse(0) + 1;
-    }
-
-    @Override
-    public int nodes() {
-        return 1 + members.values()
-                .stream()
-                .mapToInt(JsonValue::nodes)
-                .sum();
-    }
-
-    /**
      * A minimalistic one-line JSON string representation
      * of the map without any form of indentation.
      */
@@ -92,7 +71,7 @@ public record JsonObject(Map<String, JsonValue> members) implements Aggregate, F
     }
 
     @Override
-    public Stream<JsonValue> values() {
+    public Stream<JsonValue> children() {
         return members().values().stream();
     }
 
