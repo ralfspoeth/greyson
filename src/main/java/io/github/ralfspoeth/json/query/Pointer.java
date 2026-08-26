@@ -1,7 +1,6 @@
 package io.github.ralfspoeth.json.query;
 
 import io.github.ralfspoeth.json.data.*;
-import org.jspecify.annotations.Nullable;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -79,11 +78,13 @@ import static java.util.Objects.requireNonNull;
  * {@link #intValue(JsonValue)}, &hellip;), and {@link #require(JsonValue)} /
  * {@link #stringOrThrow(JsonValue)}, which throw a {@link java.util.NoSuchElementException}
  * naming this pointer when a required value is absent or of the wrong type.</li>
- * <li><b>Writing</b> &mdash; {@link #with(JsonValue, JsonValue)} and
- * {@link #without(JsonValue)} return a modified immutable copy of a document,
- * sharing every subtree not on the path. Missing object members are created;
- * an {@code [n]} step requires an existing array; a {@code #regex} segment is
- * not writable.</li>
+ * <li><b>Writing</b> &mdash; pointers address a location in a mutable
+ * {@link Builder} tree: {@link #at(Builder)} returns the live builder there,
+ * and {@link #set(Builder, JsonValue)} / {@link #remove(Builder)} modify it in
+ * place. Read a document into a builder, edit it by pointer, then
+ * {@link Builder#build() build} the new immutable value. Missing object members
+ * are created; an {@code [n]} step requires an existing array; a {@code #regex}
+ * segment is not writable.</li>
  * <li><b>Composing</b> &mdash; {@link #resolve(Pointer)} concatenates two
  * pointers, {@link #select(Selector)} fans out from where this pointer
  * resolves, and {@link #as(Function, Function)} maps the resolved value.</li>
@@ -162,31 +163,47 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
         }
 
         // ---- write side ----------------------------------------------------
-        // Read and write share the same parent chain: where evalSegment reads
-        // this segment's slot, rebuildContainer produces a copy of the parent
-        // container with that slot set (or removed when replacement is empty),
-        // and setIn walks the new container back up to the root.
+        // Writes address a mutable Builder tree. The same parent chain that
+        // drives reads drives writes: evalIn reads this segment's slot from a
+        // container builder, setIn/removeIn mutate it, and vivify walks down
+        // once (O(depth)) creating missing object levels on the way.
 
         /**
-         * Return a copy of {@code container} (the value at this segment's parent,
-         * or {@code null} when that did not resolve) with this segment's slot set
-         * to {@code replacement}, or the slot removed when {@code replacement} is
-         * {@code null}. Implementations decide whether a missing/wrong-typed
-         * container is auto-created or rejected.
+         * Read this segment's slot from a <em>builder</em> container; empty when
+         * the container is of the wrong shape or the slot is absent.
          */
-        abstract JsonValue rebuildContainer(@Nullable JsonValue container, @Nullable JsonValue replacement);
+        abstract Optional<Builder<? extends JsonValue>> evalIn(Builder<? extends JsonValue> container);
 
         /**
-         * Produce a new root in which the value this pointer addresses is
-         * replaced by {@code replacement} ({@code null} = remove). Each level
-         * rebuilds exactly one container; all untouched subtrees are shared.
+         * Set this segment's slot in {@code container} to {@code value}.
+         *
+         * @throws IllegalStateException if {@code container} cannot hold this segment
          */
-        JsonValue setIn(JsonValue root, @Nullable JsonValue replacement) {
-            var container = parent.apply(root).orElse(null);
-            var rebuilt = rebuildContainer(container, replacement);
-            return parent instanceof AbstractPointer ap
-                    ? ap.setIn(root, rebuilt)
-                    : rebuilt;
+        abstract void setIn(Builder<? extends JsonValue> container, Builder<? extends JsonValue> value);
+
+        /**
+         * Remove this segment's slot from {@code container}. Removing an absent
+         * slot is a no-op.
+         */
+        abstract void removeIn(Builder<? extends JsonValue> container);
+
+        /**
+         * Resolve this segment's slot as a container to descend into, creating it
+         * when missing. Object members are created on demand; arrays are not.
+         */
+        abstract Builder<? extends JsonValue> vivifyIn(Builder<? extends JsonValue> container);
+
+        /**
+         * Walk from {@code root} down to the container this segment addresses,
+         * creating missing object levels. One pass, no re-navigation from the root.
+         */
+        Builder<? extends JsonValue> vivify(Builder<? extends JsonValue> root) {
+            return vivifyIn(parent instanceof AbstractPointer ap ? ap.vivify(root) : root);
+        }
+
+        /** The container this segment's slot lives in, creating missing levels. */
+        Builder<? extends JsonValue> containerFor(Builder<? extends JsonValue> root) {
+            return parent instanceof AbstractPointer ap ? ap.vivify(root) : root;
         }
 
         /**
@@ -223,13 +240,41 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
         }
 
         @Override
-        JsonValue rebuildContainer(@Nullable JsonValue container, @Nullable JsonValue replacement) {
-            // A missing or non-object container auto-vivifies to an empty object,
-            // so chains of members materialise on write. Untouched members keep
-            // their original instances (see withMember) — off-path subtrees are
-            // shared, not deep-copied.
-            var obj = container instanceof JsonObject jo ? jo : new JsonObject(Map.of());
-            return withMember(obj, memberName, replacement);
+        Optional<Builder<? extends JsonValue>> evalIn(Builder<? extends JsonValue> container) {
+            if (!(container instanceof Builder.ObjectBuilder ob)) return Optional.empty();
+            Builder<? extends JsonValue> child = ob.data().get(memberName);
+            return Optional.ofNullable(child);
+        }
+
+        @Override
+        void setIn(Builder<? extends JsonValue> container, Builder<? extends JsonValue> value) {
+            if (!(container instanceof Builder.ObjectBuilder ob)) {
+                throw new IllegalStateException("member step " + this + " requires an object builder");
+            }
+            ob.put(memberName, value);
+        }
+
+        @Override
+        void removeIn(Builder<? extends JsonValue> container) {
+            if (container instanceof Builder.ObjectBuilder ob) {
+                ob.remove(memberName);
+            }
+        }
+
+        @Override
+        Builder<? extends JsonValue> vivifyIn(Builder<? extends JsonValue> container) {
+            if (!(container instanceof Builder.ObjectBuilder ob)) {
+                throw new IllegalStateException("member step " + this + " requires an object builder");
+            }
+            // Descend into an existing aggregate; otherwise create (or replace a
+            // scalar with) a fresh object so member chains materialise on write.
+            Builder<? extends JsonValue> child = ob.data().get(memberName);
+            if (child instanceof Builder.ObjectBuilder || child instanceof Builder.ArrayBuilder) {
+                return child;
+            }
+            var fresh = Builder.objectBuilder();
+            ob.put(memberName, fresh);
+            return fresh;
         }
 
         @Override
@@ -275,24 +320,60 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
             return new IndexPointer(index, parent);
         }
 
+        /**
+         * The absolute index within {@code ab}, or {@code -1} when out of range.
+         * Negative indices count from the end.
+         */
+        private int indexIn(Builder.ArrayBuilder ab) {
+            int n = ab.data().size();
+            int i = index < 0 ? n + index : index;
+            return (i < 0 || i >= n) ? -1 : i;
+        }
+
+        // Arrays cannot be conjured from nothing (no defined length), so a
+        // missing or non-array container is an error rather than a create.
+        private Builder.ArrayBuilder requireArray(Builder<? extends JsonValue> container) {
+            if (container instanceof Builder.ArrayBuilder ab) return ab;
+            throw new IllegalStateException("index step " + this + " requires an existing array");
+        }
+
         @Override
-        JsonValue rebuildContainer(@Nullable JsonValue container, @Nullable JsonValue replacement) {
-            // Arrays cannot be conjured from nothing (no defined length), so a
-            // missing or non-array container is an error rather than a create.
-            if (container instanceof JsonArray(var elements)) {
-                var list = new ArrayList<>(elements);
-                int n = list.size();
-                int i = index < 0 ? n + index : index; // negative counts from the end
-                if (i < 0 || i >= n) {
-                    throw new IndexOutOfBoundsException("index " + index + " out of bounds for " + this);
-                }
-                if (replacement == null) list.remove(i);
-                else list.set(i, replacement);
-                return new JsonArray(list);
-            } else {
-                throw new IllegalStateException(
-                        "index step " + this + " requires an existing array");
+        Optional<Builder<? extends JsonValue>> evalIn(Builder<? extends JsonValue> container) {
+            if (!(container instanceof Builder.ArrayBuilder ab)) return Optional.empty();
+            int i = indexIn(ab);
+            if (i < 0) return Optional.empty();
+            Builder<? extends JsonValue> child = ab.data().get(i);
+            return Optional.of(child);
+        }
+
+        @Override
+        void setIn(Builder<? extends JsonValue> container, Builder<? extends JsonValue> value) {
+            var ab = requireArray(container);
+            int i = indexIn(ab);
+            if (i < 0) throw new IndexOutOfBoundsException("index " + index + " out of bounds for " + this);
+            ab.data().set(i, value);
+        }
+
+        @Override
+        void removeIn(Builder<? extends JsonValue> container) {
+            if (container instanceof Builder.ArrayBuilder ab) {
+                int i = indexIn(ab);
+                if (i >= 0) ab.remove(i);
             }
+        }
+
+        @Override
+        Builder<? extends JsonValue> vivifyIn(Builder<? extends JsonValue> container) {
+            var ab = requireArray(container);
+            int i = indexIn(ab);
+            if (i < 0) throw new IndexOutOfBoundsException("index " + index + " out of bounds for " + this);
+            var child = ab.data().get(i);
+            if (child instanceof Builder.ObjectBuilder || child instanceof Builder.ArrayBuilder) {
+                return child;
+            }
+            var fresh = Builder.objectBuilder();
+            ab.data().set(i, fresh);
+            return fresh;
         }
 
         @Override
@@ -348,13 +429,36 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
         }
 
         @Override
-        JsonValue rebuildContainer(@Nullable JsonValue container, @Nullable JsonValue replacement) {
-            // On a hit the target is deterministic, but on a miss there is no
-            // defined key to create, and mutating "the lexicographically
-            // smallest match" is a surprising thing to do silently.
-            throw new UnsupportedOperationException(
+        Optional<Builder<? extends JsonValue>> evalIn(Builder<? extends JsonValue> container) {
+            if (!(container instanceof Builder.ObjectBuilder ob)) return Optional.empty();
+            return ob.data().entrySet().stream()
+                    .filter(e -> pattern.matcher(e.getKey()).matches())
+                    .min(Map.Entry.comparingByKey())
+                    .map(Map.Entry::getValue);
+        }
+
+        // On a hit the target is deterministic, but on a miss there is no defined
+        // key to create, and mutating "the lexicographically smallest match" is a
+        // surprising thing to do silently — so this segment reads but never writes.
+        private UnsupportedOperationException notWritable() {
+            return new UnsupportedOperationException(
                     "regex segment " + this + " is not addressable for writes; "
                             + "resolve it to a concrete member first");
+        }
+
+        @Override
+        void setIn(Builder<? extends JsonValue> container, Builder<? extends JsonValue> value) {
+            throw notWritable();
+        }
+
+        @Override
+        void removeIn(Builder<? extends JsonValue> container) {
+            throw notWritable();
+        }
+
+        @Override
+        Builder<? extends JsonValue> vivifyIn(Builder<? extends JsonValue> container) {
+            throw notWritable();
         }
 
         @Override
@@ -427,34 +531,64 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
             return new JsonPointerSegment(token, parent);
         }
 
+        // Writes dispatch on the runtime container type, mirroring evalSegment, so
+        // RFC 6901 strings round-trip through writes (JSON Patch interop).
+
         @Override
-        JsonValue rebuildContainer(@Nullable JsonValue container, @Nullable JsonValue replacement) {
-            // Dispatch on the runtime container type, mirroring evalSegment, so
-            // RFC 6901 strings round-trip through writes (JSON Patch interop).
+        Optional<Builder<? extends JsonValue>> evalIn(Builder<? extends JsonValue> container) {
             return switch (container) {
-                case JsonArray arr -> {
-                    int idx = parseRfc6901Index(token);
-                    var list = new ArrayList<>(arr.elements());
-                    if (idx < 0 || idx > list.size()) {
-                        throw new IndexOutOfBoundsException("RFC 6901 index " + token + " at " + this);
-                    }
-                    if (replacement == null) {
-                        if (idx < list.size()) list.remove(idx);
-                    } else if (idx == list.size()) {
-                        list.add(replacement); // append at end
-                    } else {
-                        list.set(idx, replacement);
-                    }
-                    yield new JsonArray(list);
+                case Builder.ObjectBuilder ob -> {
+                    Builder<? extends JsonValue> child = ob.data().get(token);
+                    yield Optional.ofNullable(child);
                 }
-                case JsonObject obj -> rebuildObject(obj, replacement);
-                case null -> rebuildObject(new JsonObject(Map.of()), replacement); // auto-vivify
-                default -> throw new IllegalStateException("cannot write through " + this);
+                case Builder.ArrayBuilder ab -> {
+                    int idx = parseRfc6901Index(token);
+                    if (idx < 0 || idx >= ab.data().size()) yield Optional.empty();
+                    Builder<? extends JsonValue> child = ab.data().get(idx);
+                    yield Optional.of(child);
+                }
+                default -> Optional.empty();
             };
         }
 
-        private JsonValue rebuildObject(JsonObject obj, @Nullable JsonValue replacement) {
-            return withMember(obj, token, replacement);
+        @Override
+        void setIn(Builder<? extends JsonValue> container, Builder<? extends JsonValue> value) {
+            switch (container) {
+                case Builder.ObjectBuilder ob -> ob.put(token, value);
+                case Builder.ArrayBuilder ab -> {
+                    int idx = parseRfc6901Index(token);
+                    int n = ab.data().size();
+                    if (idx < 0 || idx > n) {
+                        throw new IndexOutOfBoundsException("RFC 6901 index " + token + " at " + this);
+                    }
+                    if (idx == n) ab.add(value); // an index equal to the length appends
+                    else ab.data().set(idx, value);
+                }
+                default -> throw new IllegalStateException("cannot write through " + this);
+            }
+        }
+
+        @Override
+        void removeIn(Builder<? extends JsonValue> container) {
+            switch (container) {
+                case Builder.ObjectBuilder ob -> ob.remove(token);
+                case Builder.ArrayBuilder ab -> {
+                    int idx = parseRfc6901Index(token);
+                    if (idx >= 0 && idx < ab.data().size()) ab.remove(idx);
+                }
+                default -> { }
+            }
+        }
+
+        @Override
+        Builder<? extends JsonValue> vivifyIn(Builder<? extends JsonValue> container) {
+            var existing = evalIn(container).orElse(null);
+            if (existing instanceof Builder.ObjectBuilder || existing instanceof Builder.ArrayBuilder) {
+                return existing;
+            }
+            var fresh = Builder.objectBuilder();
+            setIn(container, fresh);
+            return fresh;
         }
 
         @Override
@@ -843,61 +977,90 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
         return Selector.of(v -> apply(v).stream().flatMap(selector));
     }
 
+    // ---- writing: pointers address a location in a mutable Builder tree -----
+
     /**
-     * Return a copy of {@code root} in which the value addressed by this pointer
-     * is set to {@code newValue}. The original {@code root} is left untouched;
-     * all subtrees not on the path are shared with it.
-     *
-     * <p>Missing intermediate <em>object</em> members are created on the way
-     * down; a missing or non-array container under an {@code [n]} index step is
-     * an {@link IllegalStateException}, and a {@code #regex} segment is not
-     * writable ({@link UnsupportedOperationException}). Applying {@code with}
-     * to {@link #self()} replaces the whole document.</p>
-     * <p>
+     * The {@link Builder} this pointer addresses within {@code root}, or empty
+     * when the path does not resolve. The returned builder is <em>live</em>:
+     * mutating it mutates {@code root}.
      * {@snippet :
-     * var p = Pointer.parse("data/users/[0]/name");
-     * JsonValue updated = p.with(doc, Basic.of("Ada")); // doc unchanged
+     * var b = someValue.builder();
+     * Pointer.parse("data/users").at(b)
+     *        .filter(Builder.ArrayBuilder.class::isInstance)
+     *        .ifPresent(users -> ((Builder.ArrayBuilder) users).addBasic("new"));
      *}
      *
-     * @param obj         the document to copy from, may not be {@code null}
-     * @param replacement the value to place at this pointer, may not be {@code null}
-     * @return a new document reflecting the change
+     * @param root the builder to navigate, may not be {@code null}
+     * @return the builder at this pointer, or empty
      */
-    // Build a new object from a shallow copy of {@code obj}'s members with one
-    // entry set (or removed when {@code replacement} is null). Every other
-    // member keeps its original instance, so the rebuild touches only the
-    // objects along the pointer's path — off-path subtrees are shared with the
-    // source document, making with()/without() O(path length), not O(document).
-    private static JsonObject withMember(JsonObject obj, String name, @Nullable JsonValue replacement) {
-        var map = new HashMap<>(obj.members());
-        if (replacement == null) map.remove(name);
-        else map.put(name, replacement);
-        return new JsonObject(map);
-    }
-
-    public JsonValue with(JsonValue root, JsonValue newValue) {
+    public Optional<Builder<? extends JsonValue>> at(Builder<? extends JsonValue> root) {
         requireNonNull(root);
-        requireNonNull(newValue);
         return this instanceof AbstractPointer ap
-                ? ap.setIn(root, newValue)
-                : newValue; // self() replaces the entire document
+                ? ap.parent.at(root).flatMap(ap::evalIn)
+                : Optional.of(root); // self() addresses the root builder
     }
 
     /**
-     * Return a copy of {@code root} with the value addressed by this pointer
-     * removed. Removing an absent slot yields an equal tree. Cannot be applied
-     * to {@link #self()}.
+     * Set the value addressed by this pointer within the builder tree
+     * {@code root}, which is <em>mutated in place</em>.
      *
-     * @param root the document to copy from, may not be {@code null}
-     * @return a new document without the addressed value
-     * @throws IllegalStateException if this is the {@link #self()} pointer
+     * <p>Missing intermediate <em>object</em> members are created on the way down
+     * (a scalar in the way is replaced by a fresh object); an {@code [n]} index
+     * step requires an existing array and an in-range index, and a {@code #regex}
+     * segment is not writable. An RFC 6901 index equal to the array length
+     * appends.</p>
+     *
+     * {@snippet :
+     * var b = Greyson.readBuilder(reader).orElseThrow();
+     * Pointer.parse("data/users/[0]/name").set(b, Basic.of("Ada"));
+     * JsonValue updated = b.build();
+     *}
+     *
+     * @param root  the builder tree to modify, may not be {@code null}
+     * @param value the value to place at this pointer, may not be {@code null}
+     * @throws IllegalStateException         if this is {@link #self()}, or a container
+     *                                       on the path cannot hold the segment
+     * @throws IndexOutOfBoundsException     if an index step is out of range
+     * @throws UnsupportedOperationException if the path contains a {@code #regex} segment
      */
-    public JsonValue without(JsonValue root) {
+    public void set(Builder<? extends JsonValue> root, JsonValue value) {
+        set(root, Builder.of(requireNonNull(value)));
+    }
+
+    /**
+     * Set the builder addressed by this pointer within {@code root}, which is
+     * <em>mutated in place</em>. See {@link #set(Builder, JsonValue)} for the
+     * path-creation rules.
+     *
+     * @param root  the builder tree to modify, may not be {@code null}
+     * @param value the builder to place at this pointer, may not be {@code null}
+     */
+    public void set(Builder<? extends JsonValue> root, Builder<? extends JsonValue> value) {
+        requireNonNull(root);
+        requireNonNull(value);
+        if (this instanceof AbstractPointer ap) {
+            ap.setIn(ap.containerFor(root), value);
+        } else {
+            throw new IllegalStateException("cannot set the root (self) pointer");
+        }
+    }
+
+    /**
+     * Remove the value addressed by this pointer from the builder tree
+     * {@code root}, which is <em>mutated in place</em>. Removing an absent slot,
+     * or one whose parent does not resolve, is a no-op — nothing is created.
+     *
+     * @param root the builder tree to modify, may not be {@code null}
+     * @throws IllegalStateException         if this is {@link #self()}
+     * @throws UnsupportedOperationException if the path contains a {@code #regex} segment
+     */
+    public void remove(Builder<? extends JsonValue> root) {
         requireNonNull(root);
         if (this instanceof AbstractPointer ap) {
-            return ap.setIn(root, null); // null replacement = remove
+            ap.parent.at(root).ifPresent(ap::removeIn);
+        } else {
+            throw new IllegalStateException("cannot remove the root (self) pointer");
         }
-        throw new IllegalStateException("cannot remove the root (self) pointer");
     }
 
     /**

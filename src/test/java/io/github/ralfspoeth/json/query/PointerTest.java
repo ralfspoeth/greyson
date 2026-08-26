@@ -2,6 +2,7 @@ package io.github.ralfspoeth.json.query;
 
 import io.github.ralfspoeth.json.Greyson;
 import io.github.ralfspoeth.json.data.Basic;
+import io.github.ralfspoeth.json.data.Builder;
 import io.github.ralfspoeth.json.data.JsonArray;
 import io.github.ralfspoeth.json.data.JsonObject;
 import io.github.ralfspoeth.json.data.JsonValue;
@@ -445,26 +446,23 @@ class PointerTest {
         System.out.println(ptr.require(jo));
     }
 
-    // ---- write side: with / without --------------------------------------
+    // ---- write side: at / set / remove on Builders ------------------------
 
     @Test
-    void testWithIsCopyOnWriteAndPreservesSiblings() {
+    void testSetReplacesAndKeepsSiblings() {
         // given {"data": {"users": [{"name": "old", "id": 1}, {"name": "two"}]}}
-        var doc = objectBuilder()
+        var b = objectBuilder()
                 .put("data", objectBuilder()
                         .put("users", arrayBuilder()
                                 .add(objectBuilder().putBasic("name", "old").putBasic("id", 1))
-                                .add(objectBuilder().putBasic("name", "two"))))
-                .build();
+                                .add(objectBuilder().putBasic("name", "two"))));
         var p = parse("data/users/[0]/name");
         // when
-        var updated = p.with(doc, Basic.of("Ada"));
+        p.set(b, Basic.of("Ada"));
+        var updated = b.build();
         // then
         assertAll(
                 () -> assertEquals("Ada", p.stringOrThrow(updated)),
-                // the original document is untouched (copy-on-write)
-                () -> assertEquals("old", p.stringOrThrow(doc)),
-                () -> assertNotSame(doc, updated),
                 // a sibling member in the same object survives
                 () -> assertEquals(1, parse("data/users/[0]/id").intOrThrow(updated)),
                 // an untouched array element survives
@@ -473,154 +471,159 @@ class PointerTest {
     }
 
     @Test
-    void testWithAutoVivifiesObjectChain() {
-        // given an empty object
-        var empty = objectBuilder().build();
+    void testSetAutoVivifiesObjectChain() {
+        var b = objectBuilder();
         var p = self().member("a").member("b").member("c");
-        // when writing deep into a path that does not exist yet
-        var built = p.with(empty, Basic.of(42));
-        // then the intermediate objects are created
-        assertAll(
-                () -> assertEquals(42, p.intOrThrow(built)),
-                // the original is still empty
-                () -> assertTrue(empty.members().isEmpty())
-        );
+        // writing deep into a path that does not exist yet creates the levels
+        p.set(b, Basic.of(42));
+        assertEquals(42, p.intOrThrow(b.build()));
     }
 
     @Test
-    void testWithNegativeIndexReplacesFromEnd() {
-        var doc = objectBuilder()
-                .put("xs", arrayBuilder().addBasic(1).addBasic(2).addBasic(3))
-                .build();
+    void testSetReplacesScalarOnThePathWithAnObject() {
+        // "a" is a number, but the path needs it to be a container
+        var b = objectBuilder().putBasic("a", 1);
+        self().member("a").member("b").set(b, Basic.of(2));
+        assertEquals(2, parse("a/b").intOrThrow(b.build()));
+    }
+
+    @Test
+    void testSetNegativeIndexWritesFromEnd() {
+        var b = objectBuilder().put("xs", arrayBuilder().addBasic(1).addBasic(2).addBasic(3));
         var last = self().member("xs").index(-1);
-        var updated = last.with(doc, Basic.of(99));
+        last.set(b, Basic.of(99));
+        var updated = b.build();
         assertAll(
                 () -> assertEquals(99, last.intOrThrow(updated)),
-                // earlier elements untouched
-                () -> assertEquals(1, self().member("xs").index(0).intOrThrow(updated)),
-                // original untouched
-                () -> assertEquals(3, last.intOrThrow(doc))
+                () -> assertEquals(1, self().member("xs").index(0).intOrThrow(updated))
         );
     }
 
     @Test
-    void testWithSelfReplacesWholeDocument() {
-        var doc = objectBuilder().putBasic("a", 1).build();
-        var replacement = Basic.of("new");
-        assertSame(replacement, self().with(doc, replacement));
+    void testSetOnSelfThrows() {
+        var b = objectBuilder().putBasic("a", 1);
+        assertThrows(IllegalStateException.class, () -> self().set(b, Basic.of("new")));
     }
 
     @Test
-    void testWithIndexRequiresExistingArray() {
-        var doc = objectBuilder().putBasic("a", 1).build();
+    void testSetIndexRequiresExistingArray() {
+        var b = objectBuilder().putBasic("a", 1);
         assertAll(
                 // "a" is a number, not an array
                 () -> assertThrows(IllegalStateException.class,
-                        () -> self().member("a").index(0).with(doc, Basic.of(9))),
-                // missing container
+                        () -> self().member("a").index(0).set(b, Basic.of(9))),
+                // a missing container vivifies to an object, which an index step rejects
                 () -> assertThrows(IllegalStateException.class,
-                        () -> self().member("missing").index(0).with(doc, Basic.of(9)))
+                        () -> self().member("missing").index(0).set(b, Basic.of(9)))
         );
     }
 
     @Test
-    void testWithIndexOutOfBoundsThrows() {
-        var doc = objectBuilder().put("xs", arrayBuilder().addBasic(1)).build();
+    void testSetIndexOutOfBoundsThrows() {
+        var b = objectBuilder().put("xs", arrayBuilder().addBasic(1));
         assertThrows(IndexOutOfBoundsException.class,
-                () -> self().member("xs").index(5).with(doc, Basic.of(9)));
+                () -> self().member("xs").index(5).set(b, Basic.of(9)));
     }
 
     @Test
-    void testWithRegexSegmentIsUnsupported() {
-        var doc = objectBuilder().putBasic("bal", 1).build();
+    void testSetRegexSegmentIsUnsupported() {
+        var b = objectBuilder().putBasic("bal", 1);
         assertThrows(UnsupportedOperationException.class,
-                () -> self().regex("bal.*").with(doc, Basic.of(2)));
+                () -> self().regex("bal.*").set(b, Basic.of(2)));
     }
 
     @Test
-    void testWithoutRemovesMemberAndKeepsSiblings() {
-        var doc = objectBuilder().putBasic("a", 1).putBasic("b", 2).build();
+    void testRemoveMemberKeepsSiblings() {
+        var b = objectBuilder().putBasic("a", 1).putBasic("b", 2);
         var a = self().member("a");
-        var pruned = a.without(doc);
+        a.remove(b);
+        var pruned = b.build();
         assertAll(
                 () -> assertTrue(a.apply(pruned).isEmpty()),
-                () -> assertEquals(2, self().member("b").intOrThrow(pruned)),
-                // original untouched
-                () -> assertEquals(1, a.intOrThrow(doc))
+                () -> assertEquals(2, self().member("b").intOrThrow(pruned))
         );
     }
 
     @Test
-    void testWithoutRemovesArrayElement() {
-        var doc = objectBuilder()
-                .put("xs", arrayBuilder().addBasic(10).addBasic(20).addBasic(30))
-                .build();
-        var pruned = self().member("xs").index(1).without(doc);
-        var xs = self().member("xs").require(pruned);
+    void testRemoveArrayElement() {
+        var b = objectBuilder().put("xs", arrayBuilder().addBasic(10).addBasic(20).addBasic(30));
+        self().member("xs").index(1).remove(b);
+        var pruned = b.build();
         assertAll(
-                () -> assertEquals(2, xs.elements().size()),
+                () -> assertEquals(2, self().member("xs").require(pruned).elements().size()),
                 () -> assertEquals(10, self().member("xs").index(0).intOrThrow(pruned)),
-                () -> assertEquals(30, self().member("xs").index(1).intOrThrow(pruned)),
-                // original length untouched
-                () -> assertEquals(3, self().member("xs").require(doc).elements().size())
+                () -> assertEquals(30, self().member("xs").index(1).intOrThrow(pruned))
         );
     }
 
     @Test
-    void testWithSharesOffPathSubtrees() {
-        // {"a": {"keep": 1}, "b": {"change": 2}}
-        var doc = objectBuilder()
-                .put("a", objectBuilder().putBasic("keep", 1))
-                .put("b", objectBuilder().putBasic("change", 2))
-                .build();
-        var aBefore = self().member("a").require(doc); // the "a" instance inside doc
-        var updated = parse("b/change").with(doc, Basic.of(99));
+    void testRemoveAbsentSlotIsNoOp() {
+        var b = objectBuilder().putBasic("a", 1);
+        var before = b.build();
+        // neither the missing member nor its missing parent is created
+        self().member("missing").remove(b);
+        self().member("nope").member("deep").remove(b);
+        assertEquals(before, b.build());
+    }
+
+    @Test
+    void testRemoveOnSelfThrows() {
+        var b = objectBuilder().putBasic("a", 1);
+        assertThrows(IllegalStateException.class, () -> self().remove(b));
+    }
+
+    @Test
+    void testAtReturnsLiveBuilder() {
+        var b = objectBuilder().put("xs", arrayBuilder().addBasic(1));
+        // the builder handed back is live: mutating it mutates the tree
+        var xs = assertInstanceOf(Builder.ArrayBuilder.class,
+                self().member("xs").at(b).orElseThrow());
+        xs.addBasic(2);
         assertAll(
-                () -> assertEquals(99, parse("b/change").intOrThrow(updated)),
-                () -> assertEquals(2, parse("b/change").intOrThrow(doc)), // original intact
-                // the off-path subtree "a" is shared by identity, not deep-copied
-                () -> assertSame(aBefore, self().member("a").require(updated))
+                () -> assertEquals(2, self().member("xs").require(b.build()).elements().size()),
+                () -> assertEquals(2, self().member("xs").index(1).intOrThrow(b.build())),
+                // self() addresses the root builder
+                () -> assertSame(b, self().at(b).orElseThrow()),
+                // a path that does not resolve is empty, and nothing is created
+                () -> assertTrue(self().member("nope").at(b).isEmpty()),
+                () -> assertTrue(self().member("nope").apply(b.build()).isEmpty())
         );
     }
 
     @Test
-    void testWithoutAbsentSlotIsNoOp() {
+    void testBuilderOfValueLeavesSourceUntouched() {
+        // the immutable bridge: value -> builder -> edit -> build
         var doc = objectBuilder().putBasic("a", 1).build();
-        var same = self().member("missing").without(doc);
-        assertEquals(doc, same);
-    }
-
-    @Test
-    void testWithoutSelfThrows() {
-        var doc = objectBuilder().putBasic("a", 1).build();
-        assertThrows(IllegalStateException.class, () -> self().without(doc));
-    }
-
-    @Test
-    void testRfc6901WriteReplaceAndAppend() throws IOException {
-        var doc = Greyson.readValue(Reader.of("[10, 20]")).orElseThrow();
-        // replace at /0
-        var replaced = Pointer.fromJsonPointer("/0").with(doc, Basic.of(99));
-        // append when the index equals the current length
-        var appended = Pointer.fromJsonPointer("/2").with(doc, Basic.of(30));
+        var b = doc.builder();
+        self().member("a").set(b, Basic.of(2));
         assertAll(
-                () -> assertEquals(99, Pointer.fromJsonPointer("/0").intOrThrow(replaced)),
-                () -> assertEquals(2, replaced.elements().size()),
-                () -> assertEquals(30, Pointer.fromJsonPointer("/2").intOrThrow(appended)),
-                () -> assertEquals(3, appended.elements().size())
+                () -> assertEquals(2, self().member("a").intOrThrow(b.build())),
+                () -> assertEquals(1, self().member("a").intOrThrow(doc)) // source intact
         );
     }
 
     @Test
-    void testRfc6901WriteNestedObject() throws IOException {
-        var doc = Greyson.readValue(Reader.of("""
+    void testRfc6901SetReplaceAndAppend() throws IOException {
+        var replaced = Greyson.readBuilder(Reader.of("[10, 20]")).orElseThrow();
+        Pointer.fromJsonPointer("/0").set(replaced, Basic.of(99));
+        var appended = Greyson.readBuilder(Reader.of("[10, 20]")).orElseThrow();
+        // an index equal to the current length appends
+        Pointer.fromJsonPointer("/2").set(appended, Basic.of(30));
+        assertAll(
+                () -> assertEquals(99, Pointer.fromJsonPointer("/0").intOrThrow(replaced.build())),
+                () -> assertEquals(2, replaced.build().elements().size()),
+                () -> assertEquals(30, Pointer.fromJsonPointer("/2").intOrThrow(appended.build())),
+                () -> assertEquals(3, appended.build().elements().size())
+        );
+    }
+
+    @Test
+    void testRfc6901SetNestedObject() throws IOException {
+        var b = Greyson.readBuilder(Reader.of("""
                 {"a": {"b": 1}}
                 """)).orElseThrow();
-        var updated = Pointer.fromJsonPointer("/a/b").with(doc, Basic.of(2));
-        assertAll(
-                () -> assertEquals(2, Pointer.fromJsonPointer("/a/b").intOrThrow(updated)),
-                () -> assertEquals(1, Pointer.fromJsonPointer("/a/b").intOrThrow(doc))
-        );
+        Pointer.fromJsonPointer("/a/b").set(b, Basic.of(2));
+        assertEquals(2, Pointer.fromJsonPointer("/a/b").intOrThrow(b.build()));
     }
 
     // ---- toString and require --------------------------------------------

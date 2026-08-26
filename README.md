@@ -219,16 +219,35 @@ Two nuances worth knowing:
 
 ### Updating a document
 
-`Pointer` writes as well as reads. `with` returns a copy of the document
-with the addressed value replaced; `without` returns a copy with it
-removed. The original is never mutated — every off-path subtree is shared
-with it, so the copies are cheap.
+`Pointer` writes as well as reads — and it writes where mutation belongs:
+on a `Builder`, the mutable twin of a `JsonValue`. Read a document into a
+builder, edit it by pointer, then build the new immutable value:
 
 ```java
-var doc = Greyson.readValue(src).orElseThrow();
-JsonValue renamed = Pointer.parse("data/users/[0]/name").with(doc, Basic.of("Ada"));
-JsonValue pruned  = Pointer.parse("data/users/[0]/name").without(doc);
-// doc is unchanged
+var b = Greyson.readBuilder(src).orElseThrow();
+
+Pointer.parse("data/users/[0]/name").set(b, Basic.of("Ada"));
+Pointer.parse("data/users/[0]/tmp").remove(b);
+
+JsonValue updated = b.build();
+```
+
+Already holding a `JsonValue`? `builder()` gives you its mutable copy, so
+the original is untouched:
+
+```java
+var b = doc.builder();
+Pointer.parse("a").set(b, Basic.of(2));
+JsonValue updated = b.build();   // doc unchanged
+```
+
+`at` hands back the *live* builder at a location, so you can keep using the
+full `Builder` API from there:
+
+```java
+Pointer.parse("data/users").at(b)
+        .map(Builder.ArrayBuilder.class::cast)
+        .ifPresent(users -> users.add(newUser));
 ```
 
 Writes drive the same engine through both path dialects, so an RFC 6901
@@ -236,22 +255,25 @@ string works too — enough to implement JSON Patch `add`/`remove`/`replace`
 on top:
 
 ```java
-JsonValue patched = Pointer.fromJsonPointer("/data/users/0/active").with(doc, JsonBoolean.TRUE);
+Pointer.fromJsonPointer("/data/users/0/active").set(b, JsonBoolean.TRUE);
 ```
 
 A few rules keep the semantics honest:
 
 - **Missing object members are created.** Writing `a/b/c` into `{}`
-  materialises the intermediate objects.
+  materialises the intermediate objects; a scalar in the way is replaced
+  by a fresh object.
 - **Arrays are not conjured.** An `[n]` step over a missing or non-array
   value throws `IllegalStateException`; an out-of-range index throws
   `IndexOutOfBoundsException`. An RFC 6901 index equal to the array length
   appends.
 - **`#regex` segments don't write.** The target is ambiguous on a miss,
-  so `with`/`without` throw `UnsupportedOperationException`; resolve to a
+  so `set`/`remove` throw `UnsupportedOperationException`; resolve to a
   concrete member first.
-- **Removing and nulling are distinct.** `without` drops the slot;
-  `with(doc, JsonNull.INSTANCE)` sets it to JSON `null`.
+- **`remove` never creates.** Removing an absent slot — or one whose
+  parent doesn't resolve — is a no-op.
+- **Removing and nulling are distinct.** `remove` drops the slot;
+  `set(b, JsonNull.INSTANCE)` sets it to JSON `null`.
 
 ### Required extraction
 
@@ -407,6 +429,33 @@ isn't, the simplicity is worth the trade.
 ---
 
 ## What's new in 1.7.0
+
+**Breaking change.** The `Pointer` write side now targets `Builder` — the
+mutable twin of a `JsonValue` — instead of rebuilding immutable copies. The
+value-side `with(JsonValue, JsonValue)` and `without(JsonValue)` are **removed**
+in favour of three methods that operate on a builder tree:
+
+| removed | replacement |
+| --- | --- |
+| `JsonValue with(JsonValue, JsonValue)` | `void set(Builder<?>, JsonValue)` / `set(Builder<?>, Builder<?>)` |
+| `JsonValue without(JsonValue)` | `void remove(Builder<?>)` |
+| — | `Optional<Builder<?>> at(Builder<?>)` — the live builder at a location |
+
+```java
+// before (1.6.x)
+JsonValue updated = Pointer.parse("a/b").with(doc, Basic.of(1));
+
+// now
+var b = doc.builder();                       // or Greyson.readBuilder(src)
+Pointer.parse("a/b").set(b, Basic.of(1));
+JsonValue updated = b.build();
+```
+
+Mutation now happens where it belongs — on the type designed for it — so the
+two halves of the library stop duplicating each other. Editing many locations no
+longer rebuilds the tree once per edit, and resolving a path is a single walk
+down (previously each level re-navigated from the root). The path-creation rules
+are unchanged: object members vivify, arrays don't, `#regex` segments don't write.
 
 - `JsonValue.children()` streams a container's immediate children — the elements
   of an array or the member values of an object (not the keys), empty for scalars
