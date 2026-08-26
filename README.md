@@ -428,6 +428,11 @@ isn't, the simplicity is worth the trade.
 
 ---
 
+## What's new in 1.7.1
+
+The javadoc for the `query` package contains a reference to the upcoming 
+JEP 540 "Simple JSON API"; the weather forecast extraction in particular.
+
 ## What's new in 1.7.0
 
 **Breaking change.** The `Pointer` write side now targets `Builder` — the
