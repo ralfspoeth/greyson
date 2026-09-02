@@ -6,7 +6,7 @@ A small, opinionated JSON library for Java.
 <dependency>
     <groupId>io.github.ralfspoeth</groupId>
     <artifactId>json</artifactId>
-    <version>1.7.0</version>
+    <version>1.8.0</version>
 </dependency>
 ```
 
@@ -325,6 +325,61 @@ doesn't resolve. `Selector.point(Pointer)` silently drops elements for
 which the pointer doesn't resolve. In both cases, missing data is
 absent from the output rather than a thrown exception.
 
+### Checking and filtering by shape
+
+A `Structure` describes the shape of a value. It maps a value to the
+`Violation`s it exhibits, so an empty stream means the value is fine:
+
+```java
+var shape = Structure.required("isin", "ccy")
+        .and(Structure.member("ccy", Structure.string()));
+
+shape.violations(doc).forEach(System.out::println);
+// data/users/[0]/ccy: expected string, got number
+```
+
+Violations point at the *defect*, not at the container: a missing key
+yields a pointer to that key, `each` rebases onto `[i]`, and `at` rebases
+onto the whole path. So a report tells you where to look.
+
+The same description also yields a `Predicate` — and because the violation
+stream is lazy, it stops at the first problem and never builds a message
+it won't use:
+
+```java
+var wellFormed = docs.children().filter(shape.predicate()).toList();
+```
+
+Where a `Selector` filters by **type** (`objects()`, `numbers()`, …), a
+`Structure` filters by **shape**.
+
+Presence and type are separate, so optional-but-typed members are natural:
+
+| | |
+| --- | --- |
+| `required("isin", "ccy")` | the object carries both keys |
+| `member("ccy", string())` | *if* `ccy` is present, it is a string |
+| `each(number())` | an array whose every element is a number |
+| `size(2)` / `size(1, 5)` / `atLeast(1)` | cardinality of an array or object |
+| `at(parse("a/b"), string())` | `a/b` resolves, and holds a string |
+| `anything()` | accepts everything; identity of `and` |
+
+Structures are records, so a description is inspectable data — comparable,
+usable as a map key, and printable via `explain()`:
+
+```java
+required("isin").and(member("ccy", string())).explain();
+// required members {isin} and "ccy": string
+```
+
+**This is deliberately not JSON Schema.** When a document has a schema that
+is authoritative for the operation at hand, use a schema validator.
+`Structure` is for data in the wild, where no such document exists or none
+is being honoured — so there is no schema I/O in either direction, no
+`$ref`, and no `anyOf`-style alternation (which would make "why did this
+fail?" ambiguous). Messages are local and self-describing, because there is
+no spec to point at.
+
 ---
 
 ## Data model
@@ -427,6 +482,27 @@ If your bottleneck is JSON parsing throughput, use Jackson. If it
 isn't, the simplicity is worth the trade.
 
 ---
+
+## What's new in 1.8.0
+
+- `Structure` (in `query`) describes the shape of a value and maps it to the
+  `Violation`s it exhibits — an empty stream means the value is fine. Violations
+  carry a `Pointer` to the *defect*, so a report says where to look rather than
+  just "no".
+- The same description yields a `Predicate` for stream work, so one shape both
+  explains and filters. Because the violation stream is lazy, `predicate()`
+  short-circuits at the first problem and never builds messages it won't use.
+  Where a `Selector` filters by type, a `Structure` filters by shape.
+- Presence and type are separate concerns — `required(…)` checks keys,
+  `member(k, shape)` types a value only if it is present — so optional-but-typed
+  members are expressible. Composed with `each`, `size`/`atLeast`, `at`, and
+  `and`, which flattens.
+- Structures are records: a description is inspectable data, comparable, usable
+  as a map key, and printable via `explain()`.
+- Explicitly **not** a JSON Schema implementation, and won't grow into one: no
+  schema I/O in either direction, no `$ref`, no `anyOf`. When a schema is
+  authoritative for the operation, use a schema validator; `Structure` is for
+  data in the wild.
 
 ## What's new in 1.7.1
 

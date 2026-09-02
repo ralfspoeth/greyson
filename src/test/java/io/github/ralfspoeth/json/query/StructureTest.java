@@ -1,0 +1,219 @@
+package io.github.ralfspoeth.json.query;
+
+import io.github.ralfspoeth.json.data.Basic;
+import io.github.ralfspoeth.json.data.JsonNull;
+import io.github.ralfspoeth.json.data.JsonObject;
+import io.github.ralfspoeth.json.data.JsonValue;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static io.github.ralfspoeth.json.data.Builder.arrayBuilder;
+import static io.github.ralfspoeth.json.data.Builder.objectBuilder;
+import static io.github.ralfspoeth.json.query.Pointer.parse;
+import static io.github.ralfspoeth.json.query.Pointer.self;
+import static io.github.ralfspoeth.json.query.Structure.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+class StructureTest {
+
+    /** {"isin": ..., "ccy": ...}, omitting "ccy" when {@code ccy} is null. */
+    private static JsonObject instrument(String isin, Object ccy) {
+        var b = objectBuilder().putBasic("isin", isin);
+        if (ccy != null) b.putBasic("ccy", ccy);
+        return b.build();
+    }
+
+    private static List<String> messages(Structure s, JsonValue v) {
+        return s.violations(v).map(Structure.Violation::toString).toList();
+    }
+
+    @Test
+    void satisfiedShapeYieldsNoViolations() {
+        var shape = required("isin", "ccy").and(member("ccy", string()));
+        assertAll(
+                () -> assertEquals(List.of(), messages(shape, instrument("US1", "USD"))),
+                () -> assertTrue(shape.predicate().test(instrument("US1", "USD")))
+        );
+    }
+
+    @Test
+    void requiredReportsEachMissingKeyAtItsOwnLocation() {
+        var shape = required("isin", "ccy", "name");
+        var violations = shape.violations(instrument("US1", null)).toList();
+        assertAll(
+                () -> assertEquals(2, violations.size()),
+                // sorted, so the report is deterministic
+                () -> assertEquals("ccy", violations.getFirst().at().toString()),
+                () -> assertEquals("name", violations.get(1).at().toString()),
+                () -> assertEquals("missing required member", violations.getFirst().message())
+        );
+    }
+
+    @Test
+    void requiredOnANonObjectIsASingleViolation() {
+        var msgs = messages(required("a"), Basic.of(42));
+        assertAll(
+                () -> assertEquals(1, msgs.size()),
+                () -> assertTrue(msgs.getFirst().startsWith("<root>: expected object")),
+                () -> assertTrue(msgs.getFirst().endsWith("got number"))
+        );
+    }
+
+    @Test
+    void memberIsOptionalButTypedWhenPresent() {
+        var shape = member("ccy", string());
+        assertAll(
+                // absent -> fine, that is what required() is for
+                () -> assertEquals(List.of(), messages(shape, instrument("US1", null))),
+                () -> assertTrue(shape.predicate().test(instrument("US1", null))),
+                // present and right -> fine
+                () -> assertEquals(List.of(), messages(shape, instrument("US1", "USD"))),
+                // present and wrong -> violation rebased onto the member
+                () -> assertEquals(List.of("ccy: expected string, got number"),
+                        messages(shape, instrument("US1", 42)))
+        );
+    }
+
+    @Test
+    void eachTagsViolationsWithTheElementIndex() {
+        var arr = arrayBuilder().addBasic("a").addBasic(2).addBasic("c").addBasic(4).build();
+        assertEquals(
+                List.of("[1]: expected string, got number", "[3]: expected string, got number"),
+                messages(each(string()), arr)
+        );
+    }
+
+    @Test
+    void eachOnANonArray() {
+        assertEquals(List.of("<root>: expected array, got object"),
+                messages(each(string()), instrument("US1", "USD")));
+    }
+
+    @Test
+    void atReachesDeepAndRebasesTheViolation() {
+        // {"data": {"users": [{"name": 1}]}}
+        var doc = objectBuilder()
+                .put("data", objectBuilder()
+                        .put("users", arrayBuilder()
+                                .add(objectBuilder().putBasic("name", 1))))
+                .build();
+        assertEquals(List.of("data/users/[0]/name: expected string, got number"),
+                messages(at(parse("data/users/[0]/name"), string()), doc));
+    }
+
+    @Test
+    void atReportsAMissingLocation() {
+        assertEquals(List.of("a/b: no value at this location"),
+                messages(at(parse("a/b"), string()), objectBuilder().build()));
+    }
+
+    @Test
+    void sizeAndAtLeast() {
+        var three = arrayBuilder().addBasic(1).addBasic(2).addBasic(3).build();
+        assertAll(
+                () -> assertEquals(List.of(), messages(size(3), three)),
+                () -> assertEquals(List.of("<root>: expected 2 element(s), got 3"), messages(size(2), three)),
+                () -> assertEquals(List.of(), messages(size(1, 5), three)),
+                () -> assertEquals(List.of(), messages(atLeast(3), three)),
+                () -> assertEquals(List.of("<root>: expected at least 4 element(s), got 3"),
+                        messages(atLeast(4), three)),
+                // objects count members
+                () -> assertEquals(List.of(), messages(size(2), instrument("US1", "USD"))),
+                () -> assertEquals(List.of("<root>: expected array or object, got null"),
+                        messages(size(1), JsonNull.INSTANCE))
+        );
+    }
+
+    @Test
+    void sizeRejectsNonsenseBounds() {
+        assertAll(
+                () -> assertThrows(IllegalArgumentException.class, () -> size(-1, 3)),
+                () -> assertThrows(IllegalArgumentException.class, () -> size(5, 2))
+        );
+    }
+
+    @Test
+    void andConcatenatesViolationsAndFlattens() {
+        var shape = required("isin").and(member("ccy", string())).and(size(2));
+        // the AST is inspectable data — three parts, not a nested tree
+        var parts = assertInstanceOf(Structure.And.class, shape).parts();
+        assertAll(
+                () -> assertEquals(3, parts.size()),
+                () -> assertInstanceOf(Structure.Required.class, parts.getFirst()),
+                // one value, two independent problems, both reported
+                () -> assertEquals(
+                        List.of("isin: missing required member", "ccy: expected string, got number"),
+                        messages(shape, objectBuilder().putBasic("ccy", 1).putBasic("x", 2).build()))
+        );
+    }
+
+    @Test
+    void anythingAcceptsEverythingAndIsTheIdentityOfAnd() {
+        assertAll(
+                () -> assertEquals(List.of(), messages(anything(), JsonNull.INSTANCE)),
+                () -> assertTrue(anything().predicate().test(Basic.of(1))),
+                () -> assertEquals(List.of(), messages(anything().and(anything()), Basic.of("x")))
+        );
+    }
+
+    @Test
+    void typeFactoriesCoverTheHierarchy() {
+        assertAll(
+                () -> assertTrue(string().predicate().test(Basic.of("s"))),
+                () -> assertTrue(number().predicate().test(Basic.of(1))),
+                () -> assertTrue(bool().predicate().test(Basic.of(true))),
+                () -> assertTrue(nul().predicate().test(JsonNull.INSTANCE)),
+                () -> assertTrue(object().predicate().test(objectBuilder().build())),
+                () -> assertTrue(array().predicate().test(arrayBuilder().build())),
+                () -> assertFalse(string().predicate().test(Basic.of(1)))
+        );
+    }
+
+    /**
+     * The motivating use case: one description, used to filter rather than to
+     * explain. Where Selector filters by type, a Structure filters by shape.
+     */
+    @Test
+    void predicateFiltersAStreamByShape() {
+        var docs = arrayBuilder()
+                .add(instrument("US1", "USD"))
+                .add(instrument("DE1", null))   // no ccy
+                .add(instrument("GB1", 42))     // ccy is not a string
+                .add(instrument("JP1", "JPY"))
+                .build();
+        var shape = required("isin", "ccy").and(member("ccy", string()));
+
+        var wellFormed = docs.children()
+                .filter(shape.predicate())
+                .flatMap(v -> self().member("isin").stringValue(v).stream())
+                .toList();
+
+        assertEquals(List.of("US1", "JP1"), wellFormed);
+    }
+
+    @Test
+    void explainDescribesTheShape() {
+        assertAll(
+                () -> assertEquals("string", string().explain()),
+                () -> assertEquals("required members {ccy, isin}", required("isin", "ccy").explain()),
+                () -> assertEquals("\"ccy\": string", member("ccy", string()).explain()),
+                () -> assertEquals("each element number", each(number()).explain()),
+                () -> assertEquals("anything", anything().explain()),
+                () -> assertEquals("a/b string", at(parse("a/b"), string()).explain()),
+                () -> assertEquals("required members {isin} and \"ccy\": string",
+                        required("isin").and(member("ccy", string())).explain())
+        );
+    }
+
+    @Test
+    void structuresAreValueObjects() {
+        // records: equal by content, usable as map keys, printable
+        assertAll(
+                () -> assertEquals(required("a", "b"), required("b", "a")),
+                () -> assertEquals(required("a").hashCode(), required("a").hashCode()),
+                () -> assertEquals(member("k", string()), member("k", string())),
+                () -> assertNotEquals(string(), number())
+        );
+    }
+}
