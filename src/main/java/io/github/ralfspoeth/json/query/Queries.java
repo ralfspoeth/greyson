@@ -234,7 +234,7 @@ public class Queries {
     }
 
     /**
-     * A {@link Gatherer} which drops every {@link JsonValue} whose key
+     * A {@link Gatherer} which drops every {@link JsonValue} who's key
      * &mdash; as extracted by the given function &mdash; has been seen
      * before, retaining the <em>first</em> occurrence. Since {@link Pointer}
      * implements {@code Function<JsonValue, Optional<JsonValue>>}, pointers

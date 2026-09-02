@@ -270,7 +270,7 @@ A few rules keep the semantics honest:
 - **`#regex` segments don't write.** The target is ambiguous on a miss,
   so `set`/`remove` throw `UnsupportedOperationException`; resolve to a
   concrete member first.
-- **`remove` never creates.** Removing an absent slot — or one whose
+- **`remove` never creates.** Removing an absent slot — or one who's
   parent doesn't resolve — is a no-op.
 - **Removing and nulling are distinct.** `remove` drops the slot;
   `set(b, JsonNull.INSTANCE)` sets it to JSON `null`.
@@ -356,14 +356,14 @@ Where a `Selector` filters by **type** (`objects()`, `numbers()`, …), a
 **Naming a member is requiring it.** Either you are interested in a member —
 and then in its value — or you are not, in which case you don't mention it:
 
-| | |
-| --- | --- |
-| `member("ccy", string())` | `ccy` is there, and it is a string |
-| `member("ccy")` | `ccy` is there, whatever it holds |
-| `each(number())` | an array whose every element is a number |
-| `size(2)` / `size(1, 5)` / `atLeast(1)` | cardinality of an array or object |
-| `parse("a/b").must(string())` | `a/b` resolves, and holds a string |
-| `anything()` | accepts everything; identity of `and` |
+| |                                          |
+| --- |------------------------------------------|
+| `member("ccy", string())` | `ccy` is there, and it is a string       |
+| `member("ccy")` | `ccy` is there, whatever it holds        |
+| `each(number())` | an array who's every element is a number |
+| `size(2)` / `size(1, 5)` / `atLeast(1)` | cardinality of an array or object        |
+| `parse("a/b").must(string())` | `a/b` resolves, and holds a string       |
+| `anything()` | accepts everything; identity of `and`    |
 
 The three query types compose in both directions, so a description never has to
 leave the algebra:

@@ -179,7 +179,7 @@ public sealed interface Shape extends Function<JsonValue, Stream<Shape.Violation
         }
     }
 
-    /** The value must be an array whose every element satisfies {@code shape}. */
+    /** The value must be an array who's every element satisfies {@code shape}. */
     record Each(Shape shape) implements Shape {
         public Each {
             requireNonNull(shape);
@@ -323,7 +323,7 @@ public sealed interface Shape extends Function<JsonValue, Stream<Shape.Violation
         return new Member(key, anything());
     }
 
-    /** An array whose every element satisfies {@code shape}. */
+    /** An array who's every element satisfies {@code shape}. */
     static Shape each(Shape shape) {
         return new Each(shape);
     }
