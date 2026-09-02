@@ -947,7 +947,7 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
      * @param <M>       some intermediary type
      * @return a function to be used with {@link Optional#flatMap(Function)}
      */
-    public <T, M> Function<? super JsonValue, Optional<? extends T>> as(
+    public <T, M> Function<JsonValue, Optional<T>> as(
             Function<? super JsonValue, Optional<? extends M>> extractor,
             Function<? super M, T> mapper) {
         return v -> apply(v).flatMap(extractor).map(mapper);
@@ -975,6 +975,28 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
      */
     public Selector select(Selector selector) {
         return Selector.of(v -> apply(v).stream().flatMap(selector));
+    }
+
+    /**
+     * Compose this pointer with a {@link Structure}: the value this pointer
+     * addresses must be present, and must satisfy {@code shape}. Violations are
+     * reported underneath this pointer, so they name the offending location in
+     * full.
+     *
+     * <p>Dual of {@link #select(Selector)}: where {@code select} fans out from
+     * where this pointer resolves, {@code must} makes an assertion about it.</p>
+     * <p>
+     * {@snippet :
+     * var shape = Pointer.parse("data/users/[0]/name").must(Structure.string());
+     * shape.violations(doc).forEach(System.out::println);
+     * // data/users/[0]/name: expected string, got number
+     *}
+     *
+     * @param shape the structure the addressed value must satisfy
+     * @return a structure asserting {@code shape} at this location
+     */
+    public Structure must(Structure shape) {
+        return new Structure.At(this, shape);
     }
 
     // ---- writing: pointers address a location in a mutable Builder tree -----

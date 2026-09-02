@@ -110,13 +110,13 @@ class StructureTest {
                                 .add(objectBuilder().putBasic("name", 1))))
                 .build();
         assertEquals(List.of("data/users/[0]/name: expected string, got number"),
-                messages(at(parse("data/users/[0]/name"), string()), doc));
+                messages(parse("data/users/[0]/name").must(string()), doc));
     }
 
     @Test
-    void atReportsAMissingLocation() {
+    void mustReportsAMissingLocation() {
         assertEquals(List.of("a/b: no value at this location"),
-                messages(at(parse("a/b"), string()), objectBuilder().build()));
+                messages(parse("a/b").must(string()), objectBuilder().build()));
     }
 
     @Test
@@ -203,6 +203,45 @@ class StructureTest {
         assertEquals(List.of("US1", "JP1"), wellFormed);
     }
 
+    /**
+     * The Selector bridge: filtering by shape stays inside the query algebra
+     * and keeps composing, instead of dropping out to {@link java.util.stream.Stream#filter}.
+     */
+    @Test
+    void selectorWhereNarrowsByShape() {
+        var docs = arrayBuilder()
+                .add(instrument("US1", "USD"))
+                .add(instrument("DE1", null))   // no ccy
+                .add(instrument("GB1", 42))     // ccy is not a string
+                .add(instrument("JP1", "JPY"))
+                .build();
+        var shape = member("isin", string()).and(member("ccy", string()));
+
+        var isins = Selector.all().where(shape)
+                .presentValues(v -> self().member("isin").stringValue(v))
+                .apply(docs)
+                .toList();
+
+        assertAll(
+                () -> assertEquals(List.of("US1", "JP1"), isins),
+                // still a Selector, so it narrows further
+                () -> assertEquals(2L, Selector.all().where(shape).apply(docs).count()),
+                () -> assertEquals(0L, Selector.all().where(shape).where(member("nope")).apply(docs).count())
+        );
+    }
+
+    @Test
+    void pointerMustAssertsAShapeAtALocation() {
+        var doc = objectBuilder().put("a", objectBuilder().putBasic("b", "ok")).build();
+        assertAll(
+                () -> assertEquals(List.of(), messages(parse("a/b").must(string()), doc)),
+                () -> assertTrue(parse("a/b").must(string()).predicate().test(doc)),
+                // must() composes with and() like any other structure
+                () -> assertEquals(List.of("a/c: no value at this location"),
+                        messages(parse("a/b").must(string()).and(parse("a/c").must(string())), doc))
+        );
+    }
+
     @Test
     void explainDescribesTheShape() {
         assertAll(
@@ -211,7 +250,7 @@ class StructureTest {
                 () -> assertEquals("\"ccy\": anything", member("ccy").explain()),
                 () -> assertEquals("each element number", each(number()).explain()),
                 () -> assertEquals("anything", anything().explain()),
-                () -> assertEquals("a/b string", at(parse("a/b"), string()).explain()),
+                () -> assertEquals("a/b string", parse("a/b").must(string()).explain()),
                 () -> assertEquals("\"isin\": string and \"ccy\": string",
                         member("isin", string()).and(member("ccy", string())).explain())
         );

@@ -37,7 +37,13 @@ import static java.util.stream.Collectors.joining;
  *}
  * Where {@link Selector} filters by <em>type</em> ({@link Selector#objects()},
  * {@link Selector#numbers()}, &hellip;), a {@code Structure} filters by
- * <em>shape</em>.
+ * <em>shape</em> — and {@link Selector#where(Structure)} keeps that inside the
+ * query algebra rather than dropping out to {@link Stream#filter}.
+ *
+ * <p>The three query types compose in both directions:
+ * {@link Pointer#select(Selector)} and {@link Selector#point(Pointer)} bridge
+ * pointer and selector, {@link Pointer#must(Structure)} asserts a shape at a
+ * location, and {@link Selector#where(Structure)} narrows a selection by shape.
  *
  * <h2>Scope</h2>
  * This is deliberately <em>not</em> a JSON Schema implementation. When a
@@ -229,7 +235,8 @@ public sealed interface Structure extends Function<JsonValue, Stream<Structure.V
 
     /**
      * The value must resolve at {@code at}, and what is found there must satisfy
-     * {@code shape}. Lets a description reach deep without nesting.
+     * {@code shape}. Lets a description reach deep without nesting; built via
+     * {@link Pointer#must(Structure)}.
      */
     record At(Pointer at, Structure shape) implements Structure {
         public At {
@@ -334,11 +341,6 @@ public sealed interface Structure extends Function<JsonValue, Stream<Structure.V
     /** An aggregate holding at least {@code min} elements or members. */
     static Structure atLeast(int min) {
         return new Size(min, Integer.MAX_VALUE);
-    }
-
-    /** {@code at} resolves, and the value found there satisfies {@code shape}. */
-    static Structure at(Pointer at, Structure shape) {
-        return new At(at, shape);
     }
 
     /** {@code JsonString} &rarr; {@code "string"}, and so on. */

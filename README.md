@@ -362,8 +362,24 @@ and then in its value — or you are not, in which case you don't mention it:
 | `member("ccy")` | `ccy` is there, whatever it holds |
 | `each(number())` | an array whose every element is a number |
 | `size(2)` / `size(1, 5)` / `atLeast(1)` | cardinality of an array or object |
-| `at(parse("a/b"), string())` | `a/b` resolves, and holds a string |
+| `parse("a/b").must(string())` | `a/b` resolves, and holds a string |
 | `anything()` | accepts everything; identity of `and` |
+
+The three query types compose in both directions, so a description never has to
+leave the algebra:
+
+| | |
+| --- | --- |
+| `pointer.select(selector)` | fan out from where the pointer resolves |
+| `selector.point(pointer)` | narrow each selected value to a sub-value |
+| `pointer.must(shape)` | assert a shape at a location |
+| `selector.where(shape)` | keep only the selected values of that shape |
+
+```java
+// still a Selector, so it keeps composing
+var wellFormed = Selector.all().where(
+        member("isin", string()).and(member("ccy", string())));
+```
 
 Structures are records, so a description is inspectable data — comparable,
 usable as a map key, and printable via `explain()`:
@@ -496,7 +512,16 @@ isn't, the simplicity is worth the trade.
   Where a `Selector` filters by type, a `Structure` filters by shape.
 - Naming a member requires it: `member(k, shape)` asserts both that `k` is there
   and that its value fits, and `member(k)` asserts presence alone. Composed with
-  `each`, `size`/`atLeast`, `at`, and `and`, which flattens.
+  `each`, `size`/`atLeast`, and `and`, which flattens.
+- The three query types now bridge in both directions: alongside
+  `Pointer.select` and `Selector.point`, `Pointer.must(shape)` asserts a shape at
+  a location and `Selector.where(shape)` narrows a selection by shape — keeping
+  shape-filtering inside the algebra rather than dropping out to `Stream.filter`.
+- `Pointer.as` and `Selector.as` no longer return wildcard-decorated function
+  types (`Function<? super JsonValue, Optional<? extends T>>` and friends), which
+  forced callers into capture for no benefit. They now return plain
+  `Function<JsonValue, Optional<T>>` / `Function<JsonValue, Stream<T>>`, matching
+  `Selector.presentValues`.
 - Structures are records: a description is inspectable data, comparable, usable
   as a map key, and printable via `explain()`.
 - Explicitly **not** a JSON Schema implementation, and won't grow into one: no

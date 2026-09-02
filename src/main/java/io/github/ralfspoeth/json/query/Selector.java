@@ -284,7 +284,7 @@ public sealed abstract class Selector implements Function<JsonValue, Stream<Json
      * @param <T> the type of the resulting stream contents
      * @param <M> an intermediary type
      */
-    public <T, M> Function<? super JsonValue, Stream<T>> as(
+    public <T, M> Function<JsonValue, Stream<T>> as(
             Function<? super JsonValue, Optional<? extends M>> extractor,
             Function<? super M, T> mapper) {
         return v -> apply(v).
@@ -340,5 +340,32 @@ public sealed abstract class Selector implements Function<JsonValue, Stream<Json
      */
     public <T> Function<JsonValue, Stream<T>> presentValues(Function<JsonValue, Optional<T>> f) {
         return v -> apply(v).map(f).filter(Optional::isPresent).map(Optional::get);
+    }
+
+    /**
+     * Narrow this selection to the values satisfying {@code shape}. Where the
+     * type selectors ({@link #objects()}, {@link #numbers()}, &hellip;) filter by
+     * <em>type</em>, this filters by <em>shape</em> — and it stays a
+     * {@code Selector}, so the selection can be narrowed further.
+     * <p>
+     * {@snippet :
+     * import io.github.ralfspoeth.json.query.Structure;
+     * JsonValue doc = null; // @replace regex="null;" replacement="..."
+     * // every element that is an object with a string "isin" and a string "ccy"
+     * var wellFormed = Selector.all().where(
+     *         Structure.member("isin", Structure.string())
+     *                 .and(Structure.member("ccy", Structure.string())));
+     * Stream.of(doc).flatMap(wellFormed).forEach(System.out::println);
+     *}
+     * <p>
+     * Because a {@link Structure}'s violation stream is lazy, each test stops at
+     * the first defect and never builds a message that is thrown away.
+     *
+     * @param shape the structure a value must satisfy to be kept
+     * @return a selector yielding only the values that satisfy {@code shape}
+     */
+    public Selector where(Structure shape) {
+        var satisfied = requireNonNull(shape).predicate();
+        return of(v -> apply(v).filter(satisfied));
     }
 }
