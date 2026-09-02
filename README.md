@@ -331,7 +331,7 @@ A `Structure` describes the shape of a value. It maps a value to the
 `Violation`s it exhibits, so an empty stream means the value is fine:
 
 ```java
-var shape = Structure.required("isin", "ccy")
+var shape = Structure.member("isin", Structure.string())
         .and(Structure.member("ccy", Structure.string()));
 
 shape.violations(doc).forEach(System.out::println);
@@ -353,12 +353,13 @@ var wellFormed = docs.children().filter(shape.predicate()).toList();
 Where a `Selector` filters by **type** (`objects()`, `numbers()`, …), a
 `Structure` filters by **shape**.
 
-Presence and type are separate, so optional-but-typed members are natural:
+**Naming a member is requiring it.** Either you are interested in a member —
+and then in its value — or you are not, in which case you don't mention it:
 
 | | |
 | --- | --- |
-| `required("isin", "ccy")` | the object carries both keys |
-| `member("ccy", string())` | *if* `ccy` is present, it is a string |
+| `member("ccy", string())` | `ccy` is there, and it is a string |
+| `member("ccy")` | `ccy` is there, whatever it holds |
 | `each(number())` | an array whose every element is a number |
 | `size(2)` / `size(1, 5)` / `atLeast(1)` | cardinality of an array or object |
 | `at(parse("a/b"), string())` | `a/b` resolves, and holds a string |
@@ -368,8 +369,8 @@ Structures are records, so a description is inspectable data — comparable,
 usable as a map key, and printable via `explain()`:
 
 ```java
-required("isin").and(member("ccy", string())).explain();
-// required members {isin} and "ccy": string
+member("isin", string()).and(member("ccy", string())).explain();
+// "isin": string and "ccy": string
 ```
 
 **This is deliberately not JSON Schema.** When a document has a schema that
@@ -493,10 +494,9 @@ isn't, the simplicity is worth the trade.
   explains and filters. Because the violation stream is lazy, `predicate()`
   short-circuits at the first problem and never builds messages it won't use.
   Where a `Selector` filters by type, a `Structure` filters by shape.
-- Presence and type are separate concerns — `required(…)` checks keys,
-  `member(k, shape)` types a value only if it is present — so optional-but-typed
-  members are expressible. Composed with `each`, `size`/`atLeast`, `at`, and
-  `and`, which flattens.
+- Naming a member requires it: `member(k, shape)` asserts both that `k` is there
+  and that its value fits, and `member(k)` asserts presence alone. Composed with
+  `each`, `size`/`atLeast`, `at`, and `and`, which flattens.
 - Structures are records: a description is inspectable data, comparable, usable
   as a map key, and printable via `explain()`.
 - Explicitly **not** a JSON Schema implementation, and won't grow into one: no

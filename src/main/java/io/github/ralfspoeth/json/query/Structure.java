@@ -5,7 +5,6 @@ import io.github.ralfspoeth.json.data.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.IntStream;
@@ -23,7 +22,7 @@ import static java.util.stream.Collectors.joining;
  * <p>A {@code Structure} maps a value to the {@link Violation}s it exhibits, so
  * an empty stream means the value satisfies the description:
  * {@snippet :
- * var shape = Structure.required("isin", "ccy")
+ * var shape = Structure.member("isin", Structure.string())
  *         .and(Structure.member("ccy", Structure.string()));
  *
  * shape.violations(doc).forEach(System.out::println);
@@ -143,36 +142,11 @@ public sealed interface Structure extends Function<JsonValue, Stream<Structure.V
         }
     }
 
-    /** The value must be an object carrying every one of {@code keys}. */
-    record Required(Set<String> keys) implements Structure {
-        public Required {
-            keys = Set.copyOf(keys);
-        }
-
-        @Override
-        public Stream<Violation> apply(JsonValue value) {
-            if (!(value instanceof JsonObject(var members))) {
-                return Stream.of(new Violation(self(),
-                        "expected object with " + explain() + ", got " + typeName(value.getClass())));
-            }
-            // one violation per missing key, each pointing at the key itself;
-            // sorted so the report is deterministic
-            return keys.stream()
-                    .filter(k -> !members.containsKey(k))
-                    .sorted()
-                    .map(k -> new Violation(self().member(k), "missing required member"));
-        }
-
-        @Override
-        public String explain() {
-            return keys.stream().sorted().collect(joining(", ", "required members {", "}"));
-        }
-    }
-
     /**
-     * If the object carries {@code key}, its value must satisfy {@code shape}.
-     * An absent key is <em>not</em> a violation — pair with
-     * {@link #required(String...)} when it must be there.
+     * The value must be an object carrying {@code key}, and what is stored there
+     * must satisfy {@code shape}. Naming a member <em>is</em> requiring it: if a
+     * member is of no interest, do not mention it; if only its presence matters,
+     * pair it with {@link #anything()}.
      */
     record Member(String key, Structure shape) implements Structure {
         public Member {
@@ -187,8 +161,9 @@ public sealed interface Structure extends Function<JsonValue, Stream<Structure.V
                         "expected object, got " + typeName(value.getClass())));
             }
             var member = members.get(key);
+            // the violation points at the key itself, not at the object
             return member == null
-                    ? Stream.empty() // optional by design
+                    ? Stream.of(new Violation(self().member(key), "missing required member"))
                     : shape.apply(member).map(v -> v.rebase(self().member(key)));
         }
 
@@ -331,14 +306,14 @@ public sealed interface Structure extends Function<JsonValue, Stream<Structure.V
         return new Type(JsonArray.class);
     }
 
-    /** The value is an object carrying every one of {@code keys}. */
-    static Structure required(String... keys) {
-        return new Required(Set.of(keys));
-    }
-
-    /** If {@code key} is present, its value satisfies {@code shape}. */
+    /** The object carries {@code key}, and its value satisfies {@code shape}. */
     static Structure member(String key, Structure shape) {
         return new Member(key, shape);
+    }
+
+    /** The object carries {@code key}, whatever is stored there. */
+    static Structure member(String key) {
+        return new Member(key, anything());
     }
 
     /** An array whose every element satisfies {@code shape}. */

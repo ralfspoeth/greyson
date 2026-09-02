@@ -30,7 +30,7 @@ class StructureTest {
 
     @Test
     void satisfiedShapeYieldsNoViolations() {
-        var shape = required("isin", "ccy").and(member("ccy", string()));
+        var shape = member("isin", string()).and(member("ccy", string()));
         assertAll(
                 () -> assertEquals(List.of(), messages(shape, instrument("US1", "USD"))),
                 () -> assertTrue(shape.predicate().test(instrument("US1", "USD")))
@@ -38,40 +38,51 @@ class StructureTest {
     }
 
     @Test
-    void requiredReportsEachMissingKeyAtItsOwnLocation() {
-        var shape = required("isin", "ccy", "name");
-        var violations = shape.violations(instrument("US1", null)).toList();
-        assertAll(
-                () -> assertEquals(2, violations.size()),
-                // sorted, so the report is deterministic
-                () -> assertEquals("ccy", violations.getFirst().at().toString()),
-                () -> assertEquals("name", violations.get(1).at().toString()),
-                () -> assertEquals("missing required member", violations.getFirst().message())
-        );
-    }
-
-    @Test
-    void requiredOnANonObjectIsASingleViolation() {
-        var msgs = messages(required("a"), Basic.of(42));
-        assertAll(
-                () -> assertEquals(1, msgs.size()),
-                () -> assertTrue(msgs.getFirst().startsWith("<root>: expected object")),
-                () -> assertTrue(msgs.getFirst().endsWith("got number"))
-        );
-    }
-
-    @Test
-    void memberIsOptionalButTypedWhenPresent() {
+    void namingAMemberRequiresIt() {
         var shape = member("ccy", string());
         assertAll(
-                // absent -> fine, that is what required() is for
-                () -> assertEquals(List.of(), messages(shape, instrument("US1", null))),
-                () -> assertTrue(shape.predicate().test(instrument("US1", null))),
                 // present and right -> fine
                 () -> assertEquals(List.of(), messages(shape, instrument("US1", "USD"))),
                 // present and wrong -> violation rebased onto the member
                 () -> assertEquals(List.of("ccy: expected string, got number"),
-                        messages(shape, instrument("US1", 42)))
+                        messages(shape, instrument("US1", 42))),
+                // absent -> a violation pointing at the key itself
+                () -> assertEquals(List.of("ccy: missing required member"),
+                        messages(shape, instrument("US1", null))),
+                () -> assertFalse(shape.predicate().test(instrument("US1", null)))
+        );
+    }
+
+    @Test
+    void memberWithoutAShapeRequiresPresenceOnly() {
+        var shape = member("ccy");
+        assertAll(
+                () -> assertEquals(List.of(), messages(shape, instrument("US1", "USD"))),
+                // any value will do, as long as it is there
+                () -> assertEquals(List.of(), messages(shape, instrument("US1", 42))),
+                () -> assertEquals(List.of("ccy: missing required member"),
+                        messages(shape, instrument("US1", null)))
+        );
+    }
+
+    @Test
+    void memberOnANonObjectIsASingleViolation() {
+        var msgs = messages(member("a", string()), Basic.of(42));
+        assertAll(
+                () -> assertEquals(1, msgs.size()),
+                () -> assertEquals("<root>: expected object, got number", msgs.getFirst())
+        );
+    }
+
+    @Test
+    void eachMissingMemberIsReportedAtItsOwnLocation() {
+        var shape = member("isin").and(member("ccy")).and(member("name"));
+        var violations = shape.violations(instrument("US1", null)).toList();
+        assertAll(
+                () -> assertEquals(2, violations.size()),
+                () -> assertEquals("ccy", violations.getFirst().at().toString()),
+                () -> assertEquals("name", violations.get(1).at().toString()),
+                () -> assertEquals("missing required member", violations.getFirst().message())
         );
     }
 
@@ -135,12 +146,12 @@ class StructureTest {
 
     @Test
     void andConcatenatesViolationsAndFlattens() {
-        var shape = required("isin").and(member("ccy", string())).and(size(2));
+        var shape = member("isin").and(member("ccy", string())).and(size(2));
         // the AST is inspectable data — three parts, not a nested tree
         var parts = assertInstanceOf(Structure.And.class, shape).parts();
         assertAll(
                 () -> assertEquals(3, parts.size()),
-                () -> assertInstanceOf(Structure.Required.class, parts.getFirst()),
+                () -> assertInstanceOf(Structure.Member.class, parts.getFirst()),
                 // one value, two independent problems, both reported
                 () -> assertEquals(
                         List.of("isin: missing required member", "ccy: expected string, got number"),
@@ -182,7 +193,7 @@ class StructureTest {
                 .add(instrument("GB1", 42))     // ccy is not a string
                 .add(instrument("JP1", "JPY"))
                 .build();
-        var shape = required("isin", "ccy").and(member("ccy", string()));
+        var shape = member("isin", string()).and(member("ccy", string()));
 
         var wellFormed = docs.children()
                 .filter(shape.predicate())
@@ -196,13 +207,13 @@ class StructureTest {
     void explainDescribesTheShape() {
         assertAll(
                 () -> assertEquals("string", string().explain()),
-                () -> assertEquals("required members {ccy, isin}", required("isin", "ccy").explain()),
                 () -> assertEquals("\"ccy\": string", member("ccy", string()).explain()),
+                () -> assertEquals("\"ccy\": anything", member("ccy").explain()),
                 () -> assertEquals("each element number", each(number()).explain()),
                 () -> assertEquals("anything", anything().explain()),
                 () -> assertEquals("a/b string", at(parse("a/b"), string()).explain()),
-                () -> assertEquals("required members {isin} and \"ccy\": string",
-                        required("isin").and(member("ccy", string())).explain())
+                () -> assertEquals("\"isin\": string and \"ccy\": string",
+                        member("isin", string()).and(member("ccy", string())).explain())
         );
     }
 
@@ -210,10 +221,11 @@ class StructureTest {
     void structuresAreValueObjects() {
         // records: equal by content, usable as map keys, printable
         assertAll(
-                () -> assertEquals(required("a", "b"), required("b", "a")),
-                () -> assertEquals(required("a").hashCode(), required("a").hashCode()),
                 () -> assertEquals(member("k", string()), member("k", string())),
-                () -> assertNotEquals(string(), number())
+                () -> assertEquals(member("k").hashCode(), member("k").hashCode()),
+                () -> assertEquals(each(string()), each(string())),
+                () -> assertNotEquals(string(), number()),
+                () -> assertNotEquals(member("a", string()), member("b", string()))
         );
     }
 }
