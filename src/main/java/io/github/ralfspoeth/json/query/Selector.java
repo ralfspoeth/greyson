@@ -43,9 +43,10 @@ import static java.util.Objects.requireNonNull;
  *       and {@link #aggregates()}.</li>
  *   <li><b>Composition</b> &mdash; {@link #point(Pointer)} narrows each value
  *       in the stream to a sub-value via a pointer (the dual of
- *       {@link Pointer#select(Selector)}); {@link #presentValues(Function)}
- *       extracts a typed value from each selected value and drops the absent
- *       ones, yielding a {@code Stream<T>}.</li>
+ *       {@link Pointer#select(Selector)}); {@link #where(Shape)} keeps only the
+ *       values of a given shape; {@link #presentValues(Function)} extracts a
+ *       typed value from each selected value and drops the absent ones,
+ *       yielding a {@code Stream<T>}.</li>
  * </ul>
  *
  * <p>Selector instances are immutable and safe to share across threads;
@@ -276,22 +277,6 @@ public sealed abstract class Selector implements Function<JsonValue, Stream<Json
     }
 
     /**
-     * Mapping function that uses an {@code extractor} for some derived value,
-     * and a {@code mapper} which maps the extracted value to the target domain.
-     * @param extractor a function that derives some property of the given input
-     * @param mapper a function that maps the result of the {@code extractor} into the target domain
-     * @return a function
-     * @param <T> the type of the resulting stream contents
-     * @param <M> an intermediary type
-     */
-    public <T, M> Function<JsonValue, Stream<T>> as(
-            Function<? super JsonValue, Optional<? extends M>> extractor,
-            Function<? super M, T> mapper) {
-        return v -> apply(v).
-                flatMap(x -> extractor.apply(x).map(mapper).stream());
-    }
-
-    /**
      * Compose this selector with a {@link Pointer}: apply this selector to
      * fan out into a stream, then narrow each element via the pointer. Values
      * for which the pointer does not resolve are dropped from the stream.
@@ -349,22 +334,22 @@ public sealed abstract class Selector implements Function<JsonValue, Stream<Json
      * {@code Selector}, so the selection can be narrowed further.
      * <p>
      * {@snippet :
-     * import io.github.ralfspoeth.json.query.Structure;
+     * import io.github.ralfspoeth.json.query.Shape;
      * JsonValue doc = null; // @replace regex="null;" replacement="..."
      * // every element that is an object with a string "isin" and a string "ccy"
      * var wellFormed = Selector.all().where(
-     *         Structure.member("isin", Structure.string())
-     *                 .and(Structure.member("ccy", Structure.string())));
+     *         Shape.member("isin", Shape.string())
+     *                 .and(Shape.member("ccy", Shape.string())));
      * Stream.of(doc).flatMap(wellFormed).forEach(System.out::println);
      *}
      * <p>
-     * Because a {@link Structure}'s violation stream is lazy, each test stops at
+     * Because a {@link Shape}'s violation stream is lazy, each test stops at
      * the first defect and never builds a message that is thrown away.
      *
-     * @param shape the structure a value must satisfy to be kept
+     * @param shape the shape a value must satisfy to be kept
      * @return a selector yielding only the values that satisfy {@code shape}
      */
-    public Selector where(Structure shape) {
+    public Selector where(Shape shape) {
         var satisfied = requireNonNull(shape).predicate();
         return of(v -> apply(v).filter(satisfied));
     }

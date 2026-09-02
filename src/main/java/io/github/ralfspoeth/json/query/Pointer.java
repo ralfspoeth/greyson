@@ -978,7 +978,7 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
     }
 
     /**
-     * Compose this pointer with a {@link Structure}: the value this pointer
+     * Compose this pointer with a {@link Shape}: the value this pointer
      * addresses must be present, and must satisfy {@code shape}. Violations are
      * reported underneath this pointer, so they name the offending location in
      * full.
@@ -987,16 +987,16 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
      * where this pointer resolves, {@code must} makes an assertion about it.</p>
      * <p>
      * {@snippet :
-     * var shape = Pointer.parse("data/users/[0]/name").must(Structure.string());
+     * var shape = Pointer.parse("data/users/[0]/name").must(Shape.string());
      * shape.violations(doc).forEach(System.out::println);
      * // data/users/[0]/name: expected string, got number
      *}
      *
-     * @param shape the structure the addressed value must satisfy
-     * @return a structure asserting {@code shape} at this location
+     * @param shape the shape the addressed value must satisfy
+     * @return a shape asserting {@code shape} at this location
      */
-    public Structure must(Structure shape) {
-        return new Structure.At(this, shape);
+    public Shape must(Shape shape) {
+        return new Shape.At(this, shape);
     }
 
     // ---- writing: pointers address a location in a mutable Builder tree -----

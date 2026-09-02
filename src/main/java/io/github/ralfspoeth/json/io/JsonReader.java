@@ -73,7 +73,7 @@ public class JsonReader implements Closeable {
     /**
      * Reads the source and returns a {@link Builder} for
      * a {@link JsonValue}, if the source contains
-     * a complete and terminated JSON structure.
+     * a complete and terminated JSON shape.
      *
      * @throws IOException whenever the lexer throws
      */

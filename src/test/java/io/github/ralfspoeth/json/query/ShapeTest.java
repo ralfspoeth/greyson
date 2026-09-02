@@ -12,10 +12,10 @@ import static io.github.ralfspoeth.json.data.Builder.arrayBuilder;
 import static io.github.ralfspoeth.json.data.Builder.objectBuilder;
 import static io.github.ralfspoeth.json.query.Pointer.parse;
 import static io.github.ralfspoeth.json.query.Pointer.self;
-import static io.github.ralfspoeth.json.query.Structure.*;
+import static io.github.ralfspoeth.json.query.Shape.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-class StructureTest {
+class ShapeTest {
 
     /** {"isin": ..., "ccy": ...}, omitting "ccy" when {@code ccy} is null. */
     private static JsonObject instrument(String isin, Object ccy) {
@@ -24,8 +24,8 @@ class StructureTest {
         return b.build();
     }
 
-    private static List<String> messages(Structure s, JsonValue v) {
-        return s.violations(v).map(Structure.Violation::toString).toList();
+    private static List<String> messages(Shape s, JsonValue v) {
+        return s.violations(v).map(Shape.Violation::toString).toList();
     }
 
     @Test
@@ -148,10 +148,10 @@ class StructureTest {
     void andConcatenatesViolationsAndFlattens() {
         var shape = member("isin").and(member("ccy", string())).and(size(2));
         // the AST is inspectable data — three parts, not a nested tree
-        var parts = assertInstanceOf(Structure.And.class, shape).parts();
+        var parts = assertInstanceOf(Shape.And.class, shape).parts();
         assertAll(
                 () -> assertEquals(3, parts.size()),
-                () -> assertInstanceOf(Structure.Member.class, parts.getFirst()),
+                () -> assertInstanceOf(Shape.Member.class, parts.getFirst()),
                 // one value, two independent problems, both reported
                 () -> assertEquals(
                         List.of("isin: missing required member", "ccy: expected string, got number"),
@@ -183,7 +183,7 @@ class StructureTest {
 
     /**
      * The motivating use case: one description, used to filter rather than to
-     * explain. Where Selector filters by type, a Structure filters by shape.
+     * explain. Where Selector filters by type, a Shape filters by shape.
      */
     @Test
     void predicateFiltersAStreamByShape() {
@@ -236,7 +236,7 @@ class StructureTest {
         assertAll(
                 () -> assertEquals(List.of(), messages(parse("a/b").must(string()), doc)),
                 () -> assertTrue(parse("a/b").must(string()).predicate().test(doc)),
-                // must() composes with and() like any other structure
+                // must() composes with and() like any other shape
                 () -> assertEquals(List.of("a/c: no value at this location"),
                         messages(parse("a/b").must(string()).and(parse("a/c").must(string())), doc))
         );

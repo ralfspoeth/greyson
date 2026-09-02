@@ -5,8 +5,8 @@ A small, opinionated JSON library for Java.
 ```xml
 <dependency>
     <groupId>io.github.ralfspoeth</groupId>
-    <artifactId>json</artifactId>
-    <version>1.8.0</version>
+    <artifactId>greyson</artifactId>
+    <version>2.0.0</version>
 </dependency>
 ```
 
@@ -327,12 +327,12 @@ absent from the output rather than a thrown exception.
 
 ### Checking and filtering by shape
 
-A `Structure` describes the shape of a value. It maps a value to the
+A `Shape` describes the shape of a value. It maps a value to the
 `Violation`s it exhibits, so an empty stream means the value is fine:
 
 ```java
-var shape = Structure.member("isin", Structure.string())
-        .and(Structure.member("ccy", Structure.string()));
+var shape = Shape.member("isin", Shape.string())
+        .and(Shape.member("ccy", Shape.string()));
 
 shape.violations(doc).forEach(System.out::println);
 // data/users/[0]/ccy: expected string, got number
@@ -351,7 +351,7 @@ var wellFormed = docs.children().filter(shape.predicate()).toList();
 ```
 
 Where a `Selector` filters by **type** (`objects()`, `numbers()`, …), a
-`Structure` filters by **shape**.
+`Shape` filters by **shape**.
 
 **Naming a member is requiring it.** Either you are interested in a member —
 and then in its value — or you are not, in which case you don't mention it:
@@ -381,7 +381,7 @@ var wellFormed = Selector.all().where(
         member("isin", string()).and(member("ccy", string())));
 ```
 
-Structures are records, so a description is inspectable data — comparable,
+Shapes are records, so a description is inspectable data — comparable,
 usable as a map key, and printable via `explain()`:
 
 ```java
@@ -391,7 +391,7 @@ member("isin", string()).and(member("ccy", string())).explain();
 
 **This is deliberately not JSON Schema.** When a document has a schema that
 is authoritative for the operation at hand, use a schema validator.
-`Structure` is for data in the wild, where no such document exists or none
+`Shape` is for data in the wild, where no such document exists or none
 is being honoured — so there is no schema I/O in either direction, no
 `$ref`, and no `anyOf`-style alternation (which would make "why did this
 fail?" ambiguous). Messages are local and self-describing, because there is
@@ -500,16 +500,48 @@ isn't, the simplicity is worth the trade.
 
 ---
 
-## What's new in 1.8.0
+## What's new in 2.0.0
 
-- `Structure` (in `query`) describes the shape of a value and maps it to the
+Greyson 2.0 changes its Maven coordinates and removes API. Everything below
+that was announced for 1.8.0 ships here instead — 1.8.0 was never released.
+
+### Migration from 1.7.x
+
+**The artifact is now `greyson`, not `json`.** The library, the module
+(`io.github.ralfspoeth.greyson`) and the docs have always said Greyson; only the
+artifactId said `json`, so searching Maven Central for "greyson" found nothing.
+1.7.x remains available at the old coordinates.
+
+```xml
+<dependency>
+    <groupId>io.github.ralfspoeth</groupId>
+    <artifactId>greyson</artifactId>   <!-- was: json -->
+    <version>2.0.0</version>
+</dependency>
+```
+
+Package names, the module name, and every type outside the table below are
+unchanged, so the code change is usually just the pom.
+
+| 1.7.x | 2.0.0 | why |
+| --- | --- | --- |
+| `Selector.as(extractor, mapper)` | `presentValues(x -> extractor.apply(x).map(mapper))` | exactly redundant with `presentValues` |
+| `Pointer.as` → `Function<? super JsonValue, Optional<? extends T>>` | → `Function<JsonValue, Optional<T>>` | wildcards at a return position forced callers into capture for no benefit |
+| `Selector.as` → `Function<? super JsonValue, Stream<T>>` | *(removed)* | see above |
+
+`Pointer.as` itself stays: unlike `Selector`, `Pointer` has no `presentValues`,
+so it isn't redundant with anything.
+
+### New in 2.0.0
+
+- `Shape` (in `query`) describes the shape of a value and maps it to the
   `Violation`s it exhibits — an empty stream means the value is fine. Violations
   carry a `Pointer` to the *defect*, so a report says where to look rather than
   just "no".
 - The same description yields a `Predicate` for stream work, so one shape both
   explains and filters. Because the violation stream is lazy, `predicate()`
   short-circuits at the first problem and never builds messages it won't use.
-  Where a `Selector` filters by type, a `Structure` filters by shape.
+  Where a `Selector` filters by type, a `Shape` filters by shape.
 - Naming a member requires it: `member(k, shape)` asserts both that `k` is there
   and that its value fits, and `member(k)` asserts presence alone. Composed with
   `each`, `size`/`atLeast`, and `and`, which flattens.
@@ -517,16 +549,11 @@ isn't, the simplicity is worth the trade.
   `Pointer.select` and `Selector.point`, `Pointer.must(shape)` asserts a shape at
   a location and `Selector.where(shape)` narrows a selection by shape — keeping
   shape-filtering inside the algebra rather than dropping out to `Stream.filter`.
-- `Pointer.as` and `Selector.as` no longer return wildcard-decorated function
-  types (`Function<? super JsonValue, Optional<? extends T>>` and friends), which
-  forced callers into capture for no benefit. They now return plain
-  `Function<JsonValue, Optional<T>>` / `Function<JsonValue, Stream<T>>`, matching
-  `Selector.presentValues`.
-- Structures are records: a description is inspectable data, comparable, usable
+- Shapes are records: a description is inspectable data, comparable, usable
   as a map key, and printable via `explain()`.
 - Explicitly **not** a JSON Schema implementation, and won't grow into one: no
   schema I/O in either direction, no `$ref`, no `anyOf`. When a schema is
-  authoritative for the operation, use a schema validator; `Structure` is for
+  authoritative for the operation, use a schema validator; `Shape` is for
   data in the wild.
 
 ## What's new in 1.7.1

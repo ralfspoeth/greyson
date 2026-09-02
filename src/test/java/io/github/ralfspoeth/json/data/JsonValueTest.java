@@ -267,7 +267,7 @@ class JsonValueTest {
         double d = 4.23;
         boolean b = true;
         String s = "Hello";
-        // 2. array'ish structures
+        // 2. array'ish shapes
         Object o = new int[]{1, 2, 3};
         List<Integer> li = List.of(1, 2, 3);
         Iterable<Integer> it = List.of(1, 2, 3);
