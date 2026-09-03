@@ -144,7 +144,18 @@ The same code accepts all of these without a configuration change:
 
 ## Query API
 
-Two abstractions, with a clear division of labor.
+Three abstractions, with a clear division of labor. Each is a function
+from `JsonValue`; they differ in what comes out, and that difference *is*
+the division:
+
+| | is a function to | answers |
+| --- | --- | --- |
+| **`Pointer`** | `Optional<JsonValue>` | *where is this one value?* |
+| **`Selector`** | `Stream<JsonValue>` | *which values are there?* |
+| **`Shape`** | `Stream<Violation>` | *what is wrong with this value?* |
+
+All three are immutable, and all three compose with each other in both
+directions — see [composing the three](#composing-the-three).
 
 **`Selector`** is a function from `JsonValue` to `Stream<JsonValue>`.
 Use it inside `Stream::flatMap` to pick out *a set of* values. Four
@@ -303,10 +314,19 @@ A `Pointer` renders to its `parse` syntax via `toString()`, and `equals`
 dispatch differently), and a member literally named `[0]` is not the
 index `[0]`. Pointers are immutable and safe to use as map keys.
 
-### Composing pointers and selectors
+### Composing the three
 
-`Pointer` and `Selector` compose in either direction. Pick the entry
-point by which side you're coming from.
+Every pair bridges in both directions, so a query never has to leave the
+algebra:
+
+| | |
+| --- | --- |
+| `pointer.select(selector)` | fan out from where the pointer resolves |
+| `selector.point(pointer)` | narrow each selected value to a sub-value |
+| `pointer.must(shape)` | assert a shape at a location |
+| `selector.where(shape)` | keep only the selected values of that shape |
+
+Pick the entry point by which side you're coming from:
 
 ```java
 // "navigate to one place, then fan out from there"
@@ -318,12 +338,31 @@ Stream.of(doc).flatMap(users).forEach(...);
 //   Selector → Pointer
 var emails = Selector.all().point(Pointer.self().member("email"));
 Stream.of(usersArray).flatMap(emails).forEach(...);
+
+// "everything here must look like this"
+//   Pointer → Shape
+var record = Shape.member("id", Shape.string())
+        .and(Shape.member("amount", Shape.number()));
+var wellFormed = Pointer.parse("records").must(Shape.each(record));
+
+// "keep only the ones that do" — note the same shape value is reused
+//   Selector → Shape, and still a Selector, so it keeps composing
+var usable = Selector.all().where(record);
 ```
 
-`Pointer.select(Selector)` returns an empty stream when the pointer
-doesn't resolve. `Selector.point(Pointer)` silently drops elements for
-which the pointer doesn't resolve. In both cases, missing data is
-absent from the output rather than a thrown exception.
+Missing data is absent from the output rather than an exception:
+`Pointer.select` yields an empty stream when the pointer doesn't resolve,
+and `Selector.point` drops elements for which it doesn't. The two `Shape`
+bridges are the deliberate exception — `must` reports an unresolved
+pointer as a violation, because a shape's whole job is to complain.
+
+There is no `Selector`-to-`Shape` *quantifier* (`every`), and that
+absence is by design: a `Selector` discards location — `all()` hands you
+array elements without their index — so such a combinator could only
+report violations at the container, which is exactly the useless report
+`Shape` exists to avoid. Filtering can cross that boundary because it
+needs only the predicate; diagnosis cannot, because it needs the paths.
+That is also why `each` is not merely `all()` with a shape attached.
 
 ### Checking and filtering by shape
 
@@ -339,8 +378,14 @@ shape.violations(doc).forEach(System.out::println);
 ```
 
 Violations point at the *defect*, not at the container: a missing key
-yields a pointer to that key, `each` rebases onto `[i]`, and `at` rebases
-onto the whole path. So a report tells you where to look.
+yields a pointer to that key, `each` rebases onto `[i]`, and `must`
+rebases onto the whole path. So a report tells you where to look:
+
+```java
+Pointer.parse("records").must(Shape.each(record)).violations(doc)
+// records/[1]/amount: expected number, got string
+// records/[2]/id: missing required member
+```
 
 The same description also yields a `Predicate` — and because the violation
 stream is lazy, it stops at the first problem and never builds a message
@@ -364,22 +409,6 @@ and then in its value — or you are not, in which case you don't mention it:
 | `size(2)` / `size(1, 5)` / `atLeast(1)` | cardinality of an array or object        |
 | `parse("a/b").must(string())` | `a/b` resolves, and holds a string       |
 | `anything()` | accepts everything; identity of `and`    |
-
-The three query types compose in both directions, so a description never has to
-leave the algebra:
-
-| | |
-| --- | --- |
-| `pointer.select(selector)` | fan out from where the pointer resolves |
-| `selector.point(pointer)` | narrow each selected value to a sub-value |
-| `pointer.must(shape)` | assert a shape at a location |
-| `selector.where(shape)` | keep only the selected values of that shape |
-
-```java
-// still a Selector, so it keeps composing
-var wellFormed = Selector.all().where(
-        member("isin", string()).and(member("ccy", string())));
-```
 
 Shapes are records, so a description is inspectable data — comparable,
 usable as a map key, and printable via `explain()`:
