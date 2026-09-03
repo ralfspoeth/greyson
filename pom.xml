@@ -21,11 +21,11 @@
         which operates around immutable data structures for
         the JSON elements.
     </description>
-    <url>https://github.com/ralfspoeth/json</url>
+    <url>https://github.com/ralfspoeth/greyson</url>
 
     <scm>
-        <developerConnection>scm:git:https://github.com/ralfspoeth/json.git</developerConnection>
-        <url>scm:git:https://github.com/ralfspoeth/json</url>
+        <developerConnection>scm:git:https://github.com/ralfspoeth/greyson.git</developerConnection>
+        <url>scm:git:https://github.com/ralfspoeth/greyson</url>
         <tag>HEAD</tag>
     </scm>
 

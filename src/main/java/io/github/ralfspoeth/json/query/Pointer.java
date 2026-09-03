@@ -155,11 +155,11 @@ public sealed abstract class Pointer implements Function<JsonValue, Optional<Jso
         abstract AbstractPointer withParent(Pointer parent);
 
         AbstractPointer resolve(AbstractPointer p) {
-            if (p.parent instanceof AbstractPointer ap) {
-                return ap.resolve(p.withParent(this));
-            } else {
-                return p.withParent(this);
-            }
+            // Rebuild p's chain on top of this, deepest segment last: resolve
+            // p's parent first, then reparent p onto the result. The recursion
+            // is bounded by p's length because each step strips one segment off
+            // p — reparenting p without shortening it would loop forever.
+            return p.withParent(p.parent instanceof AbstractPointer ap ? resolve(ap) : this);
         }
 
         // ---- write side ----------------------------------------------------

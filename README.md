@@ -6,7 +6,7 @@ A small, opinionated JSON library for Java.
 <dependency>
     <groupId>io.github.ralfspoeth</groupId>
     <artifactId>greyson</artifactId>
-    <version>2.0.0</version>
+    <version>2.0.1</version>
 </dependency>
 ```
 
@@ -499,6 +499,17 @@ If your bottleneck is JSON parsing throughput, use Jackson. If it
 isn't, the simplicity is worth the trade.
 
 ---
+
+## What's new in 2.0.1
+
+- **Fixes a `StackOverflowError` in `Pointer.resolve(Pointer)`** when the
+  right-hand pointer had more than one segment. The recursion reparented the
+  argument without shortening it, so two states alternated forever. Every call
+  site in the library and its tests happened to pass a single-segment pointer,
+  which took the terminating branch — until `Shape.Violation.rebase` started
+  composing multi-segment paths, so `parse("records").must(each(shape))` blew the
+  stack. `resolve` now recurses on the argument's parent and reparents on the way
+  out, bounded by the argument's length.
 
 ## What's new in 2.0.0
 

@@ -406,6 +406,35 @@ class PointerTest {
     }
 
     @Test
+    void testResolveWithMultiSegmentRightHandSide() {
+        // Every other resolve() call in this suite passes a single-segment
+        // pointer, which took the terminating branch. A longer right-hand side
+        // used to reparent p without shortening it, ping-ponging until the
+        // stack blew — the path Shape.Violation.rebase takes.
+        var base = parse("data/users");
+        var tail = parse("[0]/name");
+        assertAll(
+                () -> assertEquals("data/users/[0]/name", base.resolve(tail).toString()),
+                () -> assertEquals(parse("data/users/[0]/name"), base.resolve(tail)),
+                () -> assertEquals("a/b/c/d/e", parse("a/b").resolve(parse("c/d/e")).toString()),
+                // self() on either side stays the identity
+                () -> assertEquals(base, base.resolve(self())),
+                () -> assertEquals(tail, self().resolve(tail))
+        );
+    }
+
+    @Test
+    void testResolveNavigatesLikeTheConcatenatedPath() {
+        var doc = objectBuilder()
+                .put("data", objectBuilder()
+                        .put("users", arrayBuilder()
+                                .add(objectBuilder().putBasic("name", "Ada"))))
+                .build();
+        assertEquals("Ada",
+                parse("data").resolve(parse("users/[0]/name")).stringOrThrow(doc));
+    }
+
+    @Test
     void testLargeArray() {
         // given
         var b = arrayBuilder();

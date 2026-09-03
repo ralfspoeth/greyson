@@ -242,6 +242,26 @@ class ShapeTest {
         );
     }
 
+    /**
+     * {@code must} over {@code each} rebases a violation twice, so the pointer
+     * handed to {@link Pointer#resolve} has more than one segment. That is the
+     * case that used to overflow the stack.
+     */
+    @Test
+    void nestedRebasingProducesFullPaths() {
+        var doc = objectBuilder()
+                .put("records", arrayBuilder()
+                        .add(objectBuilder().putBasic("id", "r1").putBasic("amount", 1))
+                        .add(objectBuilder().putBasic("id", "r2").putBasic("amount", "oops"))
+                        .add(objectBuilder().putBasic("amount", 3)))
+                .build();
+        var record = member("id", string()).and(member("amount", number()));
+        assertEquals(
+                List.of("records/[1]/amount: expected number, got string",
+                        "records/[2]/id: missing required member"),
+                messages(parse("records").must(each(record)), doc));
+    }
+
     @Test
     void explainDescribesTheShape() {
         assertAll(
