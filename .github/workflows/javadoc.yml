@@ -8,7 +8,7 @@ name: Javadoc
 
 on:
   push:
-    branches: [ main ]
+    branches: [ master ]
     paths:
       - 'src/main/java/**'
       - 'pom.xml'
