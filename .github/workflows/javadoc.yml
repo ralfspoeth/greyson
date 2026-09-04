@@ -41,9 +41,17 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      # The javadoc build needs the test sources on the snippet path (see the
-      # maven-javadoc-plugin config in pom.xml): package-info.java pulls
-      # regions out of GreysonWay, which lives under src/test/java.
+      # 'compile' is required, not incidental. maven-javadoc-plugin decides
+      # whether a project is a named module by looking for a compiled
+      # module-info.class under target/classes, not by reading module-info.java.
+      # Run javadoc:javadoc straight after clean and that directory is empty, so
+      # the plugin classifies this modular project as unnamed and fails with
+      # "Creating an aggregated report for both named and unnamed modules is not
+      # possible." Releases never hit this because package/install compile first.
+      #
+      # The build also needs the test sources on the snippet path (see the
+      # maven-javadoc-plugin config in pom.xml): package-info.java pulls regions
+      # out of GreysonWay, which lives under src/test/java.
       - name: Build javadoc
         run: mvn -B -ntp clean compile javadoc:javadoc
 
