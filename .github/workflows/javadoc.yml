@@ -45,7 +45,7 @@ jobs:
       # maven-javadoc-plugin config in pom.xml): package-info.java pulls
       # regions out of GreysonWay, which lives under src/test/java.
       - name: Build javadoc
-        run: mvn -B -ntp clean javadoc:javadoc
+        run: mvn -B -ntp clean compile javadoc:javadoc
 
       # maven-javadoc-plugin has moved its default output directory between
       # versions (target/site/apidocs vs target/reports/apidocs), so locate it
