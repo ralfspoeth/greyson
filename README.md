@@ -10,6 +10,9 @@ A small, opinionated JSON library for Java.
 </dependency>
 ```
 
+📖 **[API documentation](https://ralfspoeth.github.io/greyson/)** — published
+from `main` on every change to the public sources.
+
 No annotations. No reflection. No code generation. Greyson parses JSON
 into immutable algebraic data types and gets out of your way. The whole
 library, with dependencies, fits in under 100 kB.
