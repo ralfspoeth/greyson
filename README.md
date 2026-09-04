@@ -6,7 +6,7 @@ A small, opinionated JSON library for Java.
 <dependency>
     <groupId>io.github.ralfspoeth</groupId>
     <artifactId>greyson</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -531,6 +531,20 @@ If your bottleneck is JSON parsing throughput, use Jackson. If it
 isn't, the simplicity is worth the trade.
 
 ---
+
+## What's new in 2.0.2
+
+No library changes — the jar is identical to 2.0.1, so there is nothing to do if
+you are already on it. This release covers documentation and repository work:
+
+- **API docs are published** to
+  [ralfspoeth.github.io/greyson](https://ralfspoeth.github.io/greyson/), rebuilt
+  by a GitHub Action on every change to the public sources.
+- **The Query API section of this README is rebuilt around the three types.** It
+  previously opened with "two abstractions" and introduced `Shape` only as an
+  afterthought; it now leads with what each type is a function *to*, and gathers
+  all four composition bridges — `select`, `point`, `must`, `where` — into one
+  place, including why there is deliberately no `Selector`-to-`Shape` quantifier.
 
 ## What's new in 2.0.1
 
