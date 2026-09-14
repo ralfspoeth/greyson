@@ -14,6 +14,22 @@ import static java.util.stream.Collectors.toMap;
  * A JSON object comprised of an immutable map of name-value pairs.
  * The members map is immutable by utilizing {@link Map#copyOf(Map)}.
  *
+ * <p>Two consequences of members being a {@link Map} are worth knowing when
+ * parsing documents you did not write:
+ * <ul>
+ * <li><b>Duplicate names collapse, last one wins.</b> A source document
+ * containing {@code {"a": 1, "a": 2}} parses to a {@code JsonObject} with the
+ * single member {@code a=2}; the earlier mapping is discarded silently and
+ * leaves no trace. <a href="https://datatracker.ietf.org/doc/html/rfc8259#section-4">RFC
+ * 8259</a> declares names SHOULD be unique and the behaviour otherwise
+ * "unpredictable", so this is one legal reading among several — but it is lossy,
+ * and Greyson offers no way to detect that it happened.</li>
+ * <li><b>Member order is not preserved.</b> {@link Map#copyOf(Map)} gives an
+ * unspecified iteration order, so {@link #json()} may emit members in a
+ * different order than they were read. Round-tripping preserves meaning, not
+ * layout.</li>
+ * </ul>
+ *
  * @param members a non-{@code null} map of name-value pairs
  *                of non-{@code null} names and non-{@code null} values.
  */

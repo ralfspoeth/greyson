@@ -524,6 +524,26 @@ Greyson's parser is exercised against the
 rejects; the `i_*` (implementation-defined) cases are documented in
 the test resources.
 
+### Two things about object members
+
+**Duplicate names: the last one wins, silently.** The suite's
+`y_object_duplicate_key*.json` cases must be *accepted*, and Greyson accepts
+them — members are collected into a `Map` while parsing, so `{"a": 1, "a": 2}`
+parses to `{"a": 2}` with no warning and no way to see that anything was
+discarded.
+
+[RFC 8259](https://datatracker.ietf.org/doc/html/rfc8259#section-4) says names
+within an object SHOULD be unique, and that the behaviour of software receiving
+non-unique names is "unpredictable". Last-one-wins is therefore a legal reading
+rather than a conformance gap, and it is the common choice among parsers. But it
+*is* a choice, and a lossy one: if you need duplicates detected, Greyson cannot
+do it and does not pretend to.
+
+**Member order is not preserved.** `JsonObject` holds its members in a
+`Map.copyOf` map, whose iteration order is unspecified, so `json()` may emit
+members in a different order than the input. Round-tripping a document preserves
+its *meaning*, not its byte-for-byte layout.
+
 Greyson is not the fastest JSON library on the JVM. Jackson and Gson
 use bespoke streaming parsers, intern strings, and skip allocation in
 the hot path. Greyson allocates an algebraic data type for every node.
