@@ -6,7 +6,7 @@ A small, opinionated JSON library for Java.
 <dependency>
     <groupId>io.github.ralfspoeth</groupId>
     <artifactId>greyson</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 
@@ -558,6 +558,23 @@ If your bottleneck is JSON parsing throughput, use Jackson. If it
 isn't, the simplicity is worth the trade.
 
 ---
+
+## What's new in 2.0.3
+
+No behaviour changes — the compiled classes are identical to 2.0.2. This release
+documents two properties of `JsonObject` that were always true and never written
+down, in the README's [Conformance](#conformance) section and in the type's own
+javadoc:
+
+- **Duplicate member names collapse, last one wins, silently.** Members are
+  collected into a `Map` while parsing, so `{"a": 1, "a": 2}` yields `{"a": 2}`
+  with no warning and no way to detect the loss afterwards. RFC 8259 leaves this
+  to the implementation, and Jackson and Gson resolve it identically — asserted
+  in `greyson-competition` rather than assumed. Jackson can additionally be
+  configured to reject duplicates outright; Greyson cannot.
+- **Member order is not preserved.** `JsonObject` stores members in a
+  `Map.copyOf` map with unspecified iteration order, so `json()` may emit them in
+  a different order than the input. Round-tripping preserves meaning, not layout.
 
 ## What's new in 2.0.2
 
