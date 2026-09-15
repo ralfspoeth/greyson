@@ -535,9 +535,16 @@ discarded.
 [RFC 8259](https://datatracker.ietf.org/doc/html/rfc8259#section-4) says names
 within an object SHOULD be unique, and that the behaviour of software receiving
 non-unique names is "unpredictable". Last-one-wins is therefore a legal reading
-rather than a conformance gap, and it is the common choice among parsers. But it
-*is* a choice, and a lossy one: if you need duplicates detected, Greyson cannot
-do it and does not pretend to.
+rather than a conformance gap — and it is what the field does: Jackson and Gson
+resolve duplicates exactly the same way, which
+[greyson-competition](https://github.com/ralfspoeth/greyson-competition) asserts
+rather than assumes.
+
+But it *is* a choice, and a lossy one. Jackson's streaming layer can be
+configured for strict duplicate detection, turning a repeated name into a parse
+error; Greyson has no such switch and cannot report that a value was dropped. If
+you need duplicates caught, Greyson is the wrong tool and does not pretend
+otherwise.
 
 **Member order is not preserved.** `JsonObject` holds its members in a
 `Map.copyOf` map, whose iteration order is unspecified, so `json()` may emit
