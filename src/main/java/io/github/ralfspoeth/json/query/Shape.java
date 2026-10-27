@@ -3,15 +3,21 @@ package io.github.ralfspoeth.json.query;
 import io.github.ralfspoeth.json.data.*;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static io.github.ralfspoeth.json.query.Pointer.self;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.joining;
+import static java.util.stream.Collectors.toSet;
 
 /**
  * A structural description of a {@link JsonValue}, used to <em>check</em> a
@@ -60,14 +66,32 @@ import static java.util.stream.Collectors.joining;
  * There is no {@code not}: negation has nothing useful to report about what it
  * expected.
  *
+ * <p>A {@code Shape} also does not become a mapper to records, tempting though
+ * it looks: it lists members and their types, a record lists components and
+ * their types, and the two appear isomorphic. They are the two <em>endpoints</em>
+ * though. The shape knows only the JSON side and the record only the Java side,
+ * while everything difficult lives on the edge between them — a field defaulting
+ * to a sibling or to a value from an enclosing object, {@code "%"} becoming an
+ * enum constant, a string becoming a {@code Currency}. None of that is written
+ * down in either endpoint, and a mechanism covering the members that do
+ * correspond one-to-one would leave the rest hand-written, which is worse than
+ * leaving all of it hand-written: two styles in one mapper, divided arbitrarily.
+ * Mapping stays explicit code over {@link Pointer}s; reaching a record from an
+ * arbitrary document needs reflection or code generation, and this library has
+ * neither.
+ *
  * <p>Shapes are obtained from the factory methods below and are immutable value
  * objects: equal shapes compare equal, hash consistently, and are usable as map
- * keys. The implementing types are intentionally not part of the public API, so
- * a description is read through {@link #explain()} rather than by matching on
- * its structure.
+ * keys. The one exception is
+ * {@link #satisfying(String, java.util.function.Predicate)}, which closes over a
+ * lambda and so compares by identity, as does any composite containing one. The
+ * implementing types are intentionally not part of the public API, so a
+ * description is read through {@link #explain()} rather than by matching on its
+ * structure.
  */
 public sealed interface Shape extends Function<JsonValue, Stream<Shape.Violation>>
-        permits TypeShape, ExactShape, MemberShape, OptionalShape, EachShape, SizeShape,
+        permits TypeShape, ExactShape, OneOfShape, MatchingShape, PredicateShape,
+                MemberShape, OptionalShape, ExactlyOneShape, EachShape, SizeShape,
                 AtShape, AndShape, OrShape {
 
     /**
@@ -269,6 +293,102 @@ public sealed interface Shape extends Function<JsonValue, Stream<Shape.Violation
     }
 
     /**
+     * The value equals one of {@code values} — the enumerated set a field is
+     * allowed to take:
+     * {@snippet :
+     * Shape.member("ccy", Shape.oneOf("USD", "EUR", "GBP"));
+     * // ccy: expected one of "EUR", "GBP", "USD", got "usd"
+     *}
+     *
+     * <p>Each argument goes through {@link Basic#of(Object)}, as with
+     * {@link Builder.ObjectBuilder#putBasic(String, Object)}, so the common cases
+     * need no wrapping. Containers are not accepted: an enumerated set of whole
+     * documents is a different thing, and {@link #exact(JsonValue)} composed with
+     * {@link #or(Shape)} says it if you ever need to.
+     *
+     * <p>Equality is {@link JsonValue}'s throughout, so numbers compare
+     * numerically: {@code oneOf(1, 2)} is satisfied by {@code 1.0}. Shapes built
+     * this way stay comparable, and the set makes them order-independent.
+     *
+     * @param values the permitted values, may not be empty
+     * @throws IllegalArgumentException if {@code values} is empty, which nothing
+     *                                  could satisfy
+     */
+    static Shape oneOf(Object... values) {
+        return new OneOfShape(Stream.of(values).map(Basic::of).collect(toSet()));
+    }
+
+    /**
+     * The value is a string matching {@code regex} in full.
+     *
+     * <p>Full match, as with {@link Pointer#regex(Pattern)} and
+     * {@link Selector#regex(Pattern)}: the pattern has to cover the whole string
+     * rather than occur somewhere in it, which is what a constraint almost always
+     * means. Use {@code .*} at either end for a containment test.
+     * {@snippet :
+     * Shape.member("ccy", Shape.matching("[A-Z]{3}"));
+     * // ccy: expected a string matching /[A-Z]{3}/, got "usd"
+     *}
+     *
+     * <p>A non-string fails with {@link #string()}'s own complaint, so the
+     * wording comes from one place. Unlike
+     * {@link #satisfying(String, Predicate)}, shapes built this way remain
+     * comparable: {@link Pattern} does not define equality, so these compare by
+     * the pattern's source and flags.
+     *
+     * @param regex the pattern the whole string must match, may not be {@code null}
+     */
+    static Shape matching(Pattern regex) {
+        return new MatchingShape(regex);
+    }
+
+    /** As {@link #matching(Pattern)}, compiling {@code regex} first. */
+    static Shape matching(String regex) {
+        return new MatchingShape(Pattern.compile(regex));
+    }
+
+    /**
+     * The value satisfies {@code test}; {@code explanation} names what was
+     * wanted, and appears in the violation and in {@link #explain()}.
+     *
+     * <p>The escape hatch for constraints on a <em>value</em>, which the other
+     * factories cannot express: they check types, exact equality, membership and
+     * cardinality, but say nothing about a number's magnitude, a string's form,
+     * or membership of a set. MCP, for instance, narrows JSON-RPC's {@code id}
+     * to a string or an <em>integer</em> rather than any number:
+     * {@snippet :
+     * var whole = Shape.satisfying("a whole number",
+     *         v -> v instanceof JsonNumber(var n) && n.stripTrailingZeros().scale() <= 0);
+     * var id = Shape.optional("id", Shape.string().or(whole));
+     * // id: expected a whole number, got 1.5
+     *}
+     *
+     * <p>Reach for it only when nothing more specific fits. Enumerated values
+     * are {@link #oneOf(Object...)} and a string's form is
+     * {@link #matching(Pattern)}; both keep the comparability this gives up, and
+     * both say it in one call rather than three.
+     *
+     * <p>A predicate can only answer about the value it is handed, so the
+     * violation sits at the root of that value. Scope it with the combinators to
+     * place it: {@code member("ccy", satisfying(...))} reports under
+     * {@code ccy}. What it reports as <em>found</em> is the value rather than its
+     * type, since the type is rarely the complaint.
+     *
+     * <p><b>Shapes built this way are not comparable.</b> A lambda has identity
+     * equality, so two {@code satisfying} shapes never compare equal even with
+     * identical arguments — and neither does any composite containing one. This
+     * is the one exception to shapes being value objects, and the reason to
+     * prefer a more specific factory when one fits.
+     *
+     * @param explanation what the value should be, phrased to read after
+     *                    "expected", may not be {@code null}
+     * @param test        the check, may not be {@code null}
+     */
+    static Shape satisfying(String explanation, Predicate<JsonValue> test) {
+        return new PredicateShape(explanation, test);
+    }
+
+    /**
      * The object carries {@code key}, and its value satisfies {@code shape}.
      * Naming a member <em>is</em> requiring it: if a member is of no interest,
      * do not mention it; if only its presence matters, use {@link #member(String)}.
@@ -280,6 +400,38 @@ public sealed interface Shape extends Function<JsonValue, Stream<Shape.Violation
     /** The object carries {@code key}, whatever is stored there. */
     static Shape member(String key) {
         return new MemberShape(key, anything());
+    }
+
+    /**
+     * Exactly one of {@code alternatives} is present, and whichever it is
+     * satisfies the shape it was given. For members a document must choose
+     * between — a JSON-RPC response carries {@code result} or {@code error},
+     * never both and never neither:
+     * {@snippet :
+     * var response = Shape.exactlyOne(Map.of("result", result, "error", error))
+     *         .and(Shape.member("jsonrpc", Shape.exact(Basic.of("2.0"))));
+     *}
+     *
+     * <p>Presence is settled first, so the two ways of getting it wrong are
+     * reported as themselves:
+     * {@snippet :
+     * // expected exactly one of "error", "result", got none
+     * // expected exactly one of "error", "result", got "error", "result"
+     *}
+     * and when exactly one <em>is</em> present, its own violations are reported
+     * in full under its key — {@code error/code: expected number, got string}.
+     * That is the reason to prefer this over an exclusive-or of
+     * {@link #member(String, Shape)} shapes: a branch that is present but
+     * malformed is the common failure, and an alternation would collapse it into
+     * "nothing matched", discarding the diagnostic that actually helps.
+     *
+     * @param alternatives member name to the shape its value must satisfy, may
+     *                     not be empty
+     * @throws IllegalArgumentException if {@code alternatives} is empty, which
+     *                                  nothing could satisfy
+     */
+    static Shape exactlyOne(Map<String, Shape> alternatives) {
+        return new ExactlyOneShape(alternatives);
     }
 
     /**
@@ -420,6 +572,97 @@ record ExactShape(JsonValue expected) implements Shape {
     }
 }
 
+/** The value must equal one of {@code values}. Built via {@link Shape#oneOf}. */
+record OneOfShape(Set<Basic<?>> values) implements Shape {
+    OneOfShape {
+        values = Set.copyOf(values);
+        if (values.isEmpty()) {
+            throw new IllegalArgumentException("no permitted values: nothing could satisfy this");
+        }
+    }
+
+    @Override
+    public Stream<Violation> apply(JsonValue value) {
+        // a set lookup rather than a scan: JsonNumber's equals and hashCode
+        // agree, so 1.0 finds 1 - which is the right answer for JSON
+        return values.contains(value)
+                ? Stream.empty()
+                : Stream.of(Violation.expected(self(), explain(), value.json()));
+    }
+
+    @Override
+    public String explain() {
+        // sorted so a report is deterministic, the set having no order
+        return values.stream().map(JsonValue::json).sorted()
+                .collect(joining(", ", "one of ", ""));
+    }
+}
+
+/** The value must be a string matching {@code regex} in full. */
+record MatchingShape(Pattern regex) implements Shape {
+    MatchingShape {
+        requireNonNull(regex);
+    }
+
+    @Override
+    public Stream<Violation> apply(JsonValue value) {
+        // being a string is a precondition shared with string(), so let that
+        // shape phrase the complaint rather than repeating it
+        if (!(value instanceof JsonString(var s))) {
+            return Shape.string().apply(value);
+        }
+        return regex.matcher(s).matches()
+                ? Stream.empty()
+                : Stream.of(Violation.expected(self(), explain(), value.json()));
+    }
+
+    @Override
+    public String explain() {
+        return "a string matching /" + regex.pattern() + "/";
+    }
+
+    // Pattern compares by identity, so two shapes built from the same regex
+    // would otherwise be unequal - which is the whole reason this is a record of
+    // its own rather than a satisfying(...) lambda.
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof MatchingShape(var other)
+                && regex.pattern().equals(other.pattern())
+                && regex.flags() == other.flags();
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(MatchingShape.class, regex.pattern(), regex.flags());
+    }
+}
+
+/**
+ * The value must satisfy an arbitrary predicate. Not comparable: a lambda has
+ * identity equality, so this is the one shape that is not a value object — see
+ * {@link Shape#satisfying(String, java.util.function.Predicate)}.
+ */
+record PredicateShape(String explanation, Predicate<JsonValue> test) implements Shape {
+    PredicateShape {
+        requireNonNull(explanation);
+        requireNonNull(test);
+    }
+
+    @Override
+    public Stream<Violation> apply(JsonValue value) {
+        // the value is what is reported: a predicate rejecting it says nothing
+        // about its type being wrong, and usually the type is fine
+        return test.test(value)
+                ? Stream.empty()
+                : Stream.of(Violation.expected(self(), explanation, value.json()));
+    }
+
+    @Override
+    public String explain() {
+        return explanation;
+    }
+}
+
 /**
  * If the object carries {@code key}, its value must satisfy {@code shape}. An
  * absent key is not a defect — the distinction {@link MemberShape} does not draw.
@@ -447,6 +690,55 @@ record OptionalShape(String key, Shape shape) implements Shape {
     public String explain() {
         // the ? marks optionality where a reader expects it
         return "\"" + key + "\"?: " + shape.explain();
+    }
+}
+
+/**
+ * Exactly one of {@code alternatives} must be present, and must satisfy its own
+ * shape. Built via {@link Shape#exactlyOne(Map)}.
+ */
+record ExactlyOneShape(Map<String, Shape> alternatives) implements Shape {
+    ExactlyOneShape {
+        alternatives = Map.copyOf(alternatives);
+        if (alternatives.isEmpty()) {
+            throw new IllegalArgumentException("no alternatives: nothing could satisfy this");
+        }
+    }
+
+    @Override
+    public Stream<Violation> apply(JsonValue value) {
+        if (!(value instanceof JsonObject(var members))) {
+            return Shape.object().apply(value);
+        }
+        // settle presence first: it is cheap, and it decides which of the three
+        // outcomes we are in before any alternative's shape is evaluated
+        var present = alternatives.keySet().stream()
+                .filter(members::containsKey)
+                .sorted()
+                .toList();
+        if (present.size() == 1) {
+            // exactly one: report its own violations in full, under its key,
+            // rather than losing them to "nothing matched"
+            var key = present.getFirst();
+            return alternatives.get(key).apply(members.get(key))
+                    .map(v -> v.rebase(self().member(key)));
+        }
+        return Stream.of(Violation.expected(self(), "exactly one of " + quoted(alternatives.keySet()),
+                present.isEmpty() ? "none" : quoted(present)));
+    }
+
+    @Override
+    public String explain() {
+        // the full rendering names each alternative's shape; the violation above
+        // deliberately uses the shorter names-only phrase, since explain() is
+        // documented as a whole-shape description rather than a message fragment
+        return alternatives.keySet().stream().sorted()
+                .map(k -> "\"" + k + "\": " + alternatives.get(k).explain())
+                .collect(joining(", ", "exactly one of ", ""));
+    }
+
+    private static String quoted(Collection<String> keys) {
+        return keys.stream().sorted().map(k -> "\"" + k + "\"").collect(joining(", "));
     }
 }
 

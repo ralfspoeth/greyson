@@ -4,12 +4,16 @@ import io.github.ralfspoeth.json.data.Aggregate;
 import io.github.ralfspoeth.json.data.Basic;
 import io.github.ralfspoeth.json.data.JsonBoolean;
 import io.github.ralfspoeth.json.data.JsonNull;
+import io.github.ralfspoeth.json.data.JsonNumber;
 import io.github.ralfspoeth.json.data.JsonObject;
 import io.github.ralfspoeth.json.data.JsonValue;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Predicate;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import static io.github.ralfspoeth.json.data.Builder.arrayBuilder;
@@ -492,6 +496,199 @@ class ShapeTest {
                         .predicate().test(arrayBuilder().addBasic(2).addBasic(1).build())),
                 // a container is not equal to a scalar
                 () -> assertFalse(exact(expected).predicate().test(Basic.of("a")))
+        );
+    }
+
+    /**
+     * A JSON-RPC response carries {@code result} or {@code error}, never both
+     * and never neither — the case {@code exactlyOne} exists for.
+     */
+    @Test
+    void exactlyOneSettlesPresenceThenDelegates() {
+        var error = member("code", number()).and(member("message", string()));
+        var response = exactlyOne(Map.of("result", anything(), "error", error));
+
+        var withResult = objectBuilder().putBasic("result", 7).build();
+        var withError = objectBuilder()
+                .put("error", objectBuilder().putBasic("code", -32600).putBasic("message", "bad"))
+                .build();
+        var both = objectBuilder()
+                .putBasic("result", 7)
+                .put("error", objectBuilder().putBasic("code", -1).putBasic("message", "x"))
+                .build();
+        var neither = objectBuilder().putBasic("jsonrpc", "2.0").build();
+
+        assertAll(
+                () -> assertEquals(List.of(), messages(response, withResult)),
+                () -> assertEquals(List.of(), messages(response, withError)),
+                // the two ways of getting presence wrong are reported as themselves
+                () -> assertEquals(
+                        List.of("<root>: expected exactly one of \"error\", \"result\", got \"error\", \"result\""),
+                        messages(response, both)),
+                () -> assertEquals(
+                        List.of("<root>: expected exactly one of \"error\", \"result\", got none"),
+                        messages(response, neither)),
+                () -> assertEquals(messages(object(), Basic.of(1)), messages(response, Basic.of(1)))
+        );
+    }
+
+    @Test
+    void exactlyOneKeepsThePresentBranchesDiagnostics() {
+        // the whole reason this is not an exclusive-or of member() shapes: a
+        // branch that is present but malformed is the common failure, and an
+        // alternation would report it as "nothing matched"
+        var error = member("code", number()).and(member("message", string()));
+        var response = exactlyOne(Map.of("result", anything(), "error", error));
+
+        var malformed = objectBuilder()
+                .put("error", objectBuilder().putBasic("code", "-32600").putBasic("message", "bad"))
+                .build();
+
+        assertEquals(List.of("error/code: expected number, got string"),
+                messages(response, malformed));
+    }
+
+    @Test
+    void exactlyOneRejectsAnEmptyChoiceAndStaysComparable() {
+        assertAll(
+                () -> assertThrows(IllegalArgumentException.class, () -> exactlyOne(Map.of())),
+                // a single alternative is degenerate but legal: it just requires that member
+                () -> assertEquals(List.of(), messages(exactlyOne(Map.of("a", string())),
+                        objectBuilder().putBasic("a", "x").build())),
+                // comparable, and order-independent since the map is
+                () -> assertEquals(exactlyOne(Map.of("a", string(), "b", number())),
+                        exactlyOne(Map.of("b", number(), "a", string()))),
+                () -> assertNotEquals(exactlyOne(Map.of("a", string())),
+                        exactlyOne(Map.of("a", number()))),
+                // explain() names each alternative's shape, unlike the message
+                () -> assertEquals("exactly one of \"a\": string, \"b\": number",
+                        exactlyOne(Map.of("a", string(), "b", number())).explain())
+        );
+    }
+
+    @Test
+    void matchingRequiresAFullMatch() {
+        var ccy = matching("[A-Z]{3}");
+        assertAll(
+                () -> assertEquals(List.of(), messages(ccy, Basic.of("USD"))),
+                // full match, not a search: neither longer nor embedded passes
+                () -> assertFalse(ccy.predicate().test(Basic.of("USDX"))),
+                () -> assertFalse(ccy.predicate().test(Basic.of("xUSDx"))),
+                () -> assertEquals(List.of("<root>: expected a string matching /[A-Z]{3}/, got \"usd\""),
+                        messages(ccy, Basic.of("usd"))),
+                // a non-string gets string()'s own complaint, worded once
+                () -> assertEquals(messages(string(), Basic.of(1)), messages(ccy, Basic.of(1))),
+                () -> assertEquals("a string matching /[A-Z]{3}/", ccy.explain()),
+                () -> assertEquals(List.of("ccy: expected a string matching /[A-Z]{3}/, got \"usd\""),
+                        messages(member("ccy", ccy), objectBuilder().putBasic("ccy", "usd").build()))
+        );
+    }
+
+    @Test
+    void matchingShapesStayComparable() {
+        // the point of a record rather than a satisfying(...) lambda: Pattern
+        // compares by identity, so equality is by source and flags
+        assertAll(
+                () -> assertEquals(matching("[A-Z]{3}"), matching("[A-Z]{3}")),
+                () -> assertEquals(matching("[A-Z]{3}").hashCode(), matching("[A-Z]{3}").hashCode()),
+                () -> assertEquals(member("ccy", matching("[A-Z]{3}")),
+                        member("ccy", matching("[A-Z]{3}"))),
+                () -> assertNotEquals(matching("[A-Z]{3}"), matching("[a-z]{3}")),
+                // flags participate: a case-insensitive pattern is a different shape
+                () -> assertNotEquals(matching(Pattern.compile("abc")),
+                        matching(Pattern.compile("abc", Pattern.CASE_INSENSITIVE)))
+        );
+    }
+
+    @Test
+    void satisfyingConstrainsTheValueAndReportsIt() {
+        var positive = satisfying("a positive number",
+                v -> v instanceof JsonNumber(var n) && n.signum() > 0);
+        assertAll(
+                () -> assertEquals(List.of(), messages(positive, Basic.of(1))),
+                // the value is reported, not its type: "got number" would be useless
+                () -> assertEquals(List.of("<root>: expected a positive number, got -5"),
+                        messages(positive, Basic.of(-5))),
+                () -> assertEquals(List.of("<root>: expected a positive number, got \"x\""),
+                        messages(positive, Basic.of("x"))),
+                () -> assertEquals("a positive number", positive.explain()),
+                // a predicate answers about the value it is handed, so scope it
+                // with a combinator to place the violation
+                () -> assertEquals(List.of("amount: expected a positive number, got -5"),
+                        messages(member("amount", positive),
+                                objectBuilder().putBasic("amount", -5).build()))
+        );
+    }
+
+    /**
+     * The case that motivated {@code satisfying}: MCP narrows JSON-RPC's
+     * {@code id} to a string or an <em>integer</em>, and {@code number()} cannot
+     * say "whole".
+     */
+    @Test
+    void satisfyingExpressesAnIntegerValuedId() {
+        var whole = satisfying("a whole number",
+                v -> v instanceof JsonNumber(var n) && n.stripTrailingZeros().scale() <= 0);
+        var id = optional("id", string().or(whole));
+
+        assertAll(
+                () -> assertTrue(id.predicate().test(objectBuilder().putBasic("id", "abc").build())),
+                () -> assertTrue(id.predicate().test(objectBuilder().putBasic("id", 7).build())),
+                // 1.0 is an integer value, scale and all
+                () -> assertTrue(id.predicate().test(objectBuilder()
+                        .putBasic("id", new BigDecimal("1.0")).build())),
+                // absent is fine, it is optional
+                () -> assertTrue(id.predicate().test(objectBuilder().build())),
+                // a fractional id is not
+                () -> assertFalse(id.predicate().test(objectBuilder()
+                        .putBasic("id", new BigDecimal("1.5")).build())),
+                () -> assertFalse(id.predicate().test(objectBuilder().putBasic("id", true).build())),
+                () -> assertEquals("\"id\"?: (string or a whole number)", id.explain())
+        );
+    }
+
+    @Test
+    void oneOfEnumeratesPermittedValues() {
+        var ccy = member("ccy", oneOf("USD", "EUR", "GBP"));
+        assertAll(
+                () -> assertTrue(ccy.predicate().test(objectBuilder().putBasic("ccy", "EUR").build())),
+                () -> assertFalse(ccy.predicate().test(objectBuilder().putBasic("ccy", "usd").build())),
+                () -> assertFalse(ccy.predicate().test(objectBuilder().putBasic("ccy", 1).build())),
+                // the value is reported, and the set is sorted so it is deterministic
+                () -> assertEquals(
+                        List.of("ccy: expected one of \"EUR\", \"GBP\", \"USD\", got \"usd\""),
+                        messages(ccy, objectBuilder().putBasic("ccy", "usd").build())),
+                () -> assertEquals("one of \"EUR\", \"GBP\", \"USD\"", oneOf("USD", "EUR", "GBP").explain())
+        );
+    }
+
+    @Test
+    void oneOfComparesNumbersNumericallyAndStaysComparable() {
+        assertAll(
+                // a set lookup finds it because JsonNumber's equals and hashCode agree
+                () -> assertTrue(oneOf(1, 2).predicate().test(Basic.of(new BigDecimal("1.0")))),
+                () -> assertFalse(oneOf(1, 2).predicate().test(Basic.of(3))),
+                // mixed kinds are fine, and null is a value like any other
+                () -> assertTrue(oneOf("a", 1, true, null).predicate().test(JsonNull.INSTANCE)),
+                // unlike satisfying, these compare equal - order-independently
+                () -> assertEquals(oneOf("USD", "EUR"), oneOf("EUR", "USD")),
+                () -> assertEquals(oneOf("USD").hashCode(), oneOf("USD").hashCode()),
+                () -> assertNotEquals(oneOf("USD"), oneOf("EUR")),
+                () -> assertThrows(IllegalArgumentException.class, Shape::oneOf)
+        );
+    }
+
+    @Test
+    void satisfyingShapesAreNotComparable() {
+        Predicate<JsonValue> same = v -> true;
+        assertAll(
+                // identical arguments, still unequal: a lambda has identity equality
+                () -> assertNotEquals(satisfying("x", v -> true), satisfying("x", v -> true)),
+                // and a composite containing one inherits that
+                () -> assertNotEquals(member("k", satisfying("x", v -> true)),
+                        member("k", satisfying("x", v -> true))),
+                // sharing the predicate instance is what makes them equal again
+                () -> assertEquals(satisfying("x", same), satisfying("x", same))
         );
     }
 

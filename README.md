@@ -6,7 +6,7 @@ A small, opinionated JSON library for Java.
 <dependency>
     <groupId>io.github.ralfspoeth</groupId>
     <artifactId>greyson</artifactId>
-    <version>2.2.0</version>
+    <version>2.3.0</version>
 </dependency>
 ```
 
@@ -411,7 +411,11 @@ and then in its value — or you are not, in which case you don't mention it.
 | `member("ccy", string())` | `ccy` is there, and it is a string       |
 | `member("ccy")` | `ccy` is there, whatever it holds        |
 | `optional("ccy", string())` | *if* `ccy` is there, it is a string      |
+| `exactlyOne(Map.of("result", r, "error", e))` | exactly one of these members, satisfying its shape |
 | `exact(Basic.of("2.0"))` | the value equals `"2.0"` — for discriminators |
+| `oneOf("USD", "EUR", "GBP")` | the value is one of these |
+| `matching("[A-Z]{3}")` | the value is a string matching the regex in full |
+| `satisfying("a whole number", p)` | the value passes an arbitrary predicate |
 | `each(number())` | an array who's every element is a number |
 | `size(2)` / `size(1, 5)` / `atLeast(1)` | cardinality of an array or object        |
 | `parse("a/b").must(string())` | `a/b` resolves, and holds a string       |
@@ -462,6 +466,18 @@ That test is about whether a schema governs the operation, not about which
 keywords a schema language happens to have: `and` and `or` overlap with
 `allOf` and `anyOf` and belong here anyway, because conjunction and
 alternation are properties of messy data rather than of specs.
+
+**And a `Shape` does not become a record mapper**, tempting though it looks: it
+lists members and their types, a record lists components and their types, and
+the two look isomorphic. But they are the two *endpoints* — the shape knows only
+the JSON side, the record only the Java side, and everything difficult lives on
+the edge between them. A field defaulting to a sibling, or to a value from an
+enclosing object; `"%"` becoming an enum constant; a string becoming a
+`Currency`. None of that is written down in either endpoint, and covering only
+the members that *do* correspond one-to-one would leave the rest hand-written —
+two styles in one mapper, split arbitrarily. Mapping stays explicit code over
+`Pointer`s; reaching an arbitrary record needs reflection or code generation,
+and Greyson has neither.
 
 ---
 
@@ -592,6 +608,84 @@ If your bottleneck is JSON parsing throughput, use Jackson. If it
 isn't, the simplicity is worth the trade.
 
 ---
+
+## What's new in 2.3.0
+
+**New: `Shape.satisfying(explanation, predicate)`.** The escape hatch for
+constraints on a *value*, which nothing else in `Shape` could express: the other
+factories check types, exact equality, membership and cardinality, but say
+nothing about a number's magnitude, a string's form, or membership of a set.
+
+MCP is what prompted it. It narrows JSON-RPC's `id` to a string or an
+*integer* — not any number — and `number()` cannot say "whole":
+
+```java
+var whole = satisfying("a whole number",
+        v -> v instanceof JsonNumber(var n) && n.stripTrailingZeros().scale() <= 0);
+
+optional("id", string().or(whole));   // "id"?: (string or a whole number)
+```
+
+A failed check reports the **value**, not its type, since the type is rarely the
+complaint: `id: expected a whole number, got 1.5`. A predicate can only answer
+about the value it is handed, so scope it with a combinator to place the
+violation — `member("amount", positive)` reports under `amount`.
+
+**One caveat, and it is a documented guarantee being narrowed.** Shapes are
+value objects, but a `satisfying` shape closes over a lambda and so compares by
+*identity* — two of them never compare equal even with identical arguments, and
+neither does any composite containing one. Prefer a specific factory where one
+fits.
+
+**New: `Shape.exactlyOne(alternatives)`.** For members a document must choose
+between — a JSON-RPC response carries `result` or `error`, never both and never
+neither:
+
+```java
+var response = exactlyOne(Map.of("result", result, "error", error))
+        .and(member("jsonrpc", exact(Basic.of("2.0"))));
+```
+
+Presence is settled first, so the two ways of getting it wrong read as
+themselves — `expected exactly one of "error", "result", got none`, or
+`… got "error", "result"`. And when exactly one *is* present, its own violations
+come through in full under its key: `error/code: expected number, got string`.
+
+That last part is why this isn't an exclusive-or of `member(…)` shapes. A branch
+that is present but slightly malformed is the *common* failure, and an
+alternation collapses it into "nothing matched", discarding the one diagnostic
+that helps. Saying what is wrong and where is the point of a `Shape`; a
+combinator that routinely throws it away would undercut that.
+
+**New: `Shape.oneOf(values…)`**, for the enumerated set a field may take:
+
+```java
+member("ccy", oneOf("USD", "EUR", "GBP"));
+// ccy: expected one of "EUR", "GBP", "USD", got "usd"
+```
+
+Arguments go through `Basic.of`, as with `putBasic`, so the common cases need no
+wrapping, and equality is `JsonValue`'s — `oneOf(1, 2)` is satisfied by `1.0`.
+These stay comparable, order-independently.
+
+It could have been sugar for `exact(a).or(exact(b))…`, but the message would
+then come from `or` and read `got string` rather than `got "usd"`, losing the
+value — which is the thing worth reporting.
+
+**New: `Shape.matching(regex)`**, another specific factory. Regex-on-a-
+string is common enough to deserve its own shape rather than a lambda:
+
+```java
+member("ccy", matching("[A-Z]{3}"));
+// ccy: expected a string matching /[A-Z]{3}/, got "usd"
+```
+
+It matches in **full**, like `Pointer.regex` and `Selector.regex` — a constraint
+almost always means the whole string, and `.*` at either end gives you
+containment. A non-string fails with `string()`'s own complaint, so that wording
+lives in one place. And unlike `satisfying`, these **stay comparable**: `Pattern`
+doesn't define equality, so the shape compares by the pattern's source and
+flags, which is the entire reason it's a record and not a lambda.
 
 ## What's new in 2.2.0
 
