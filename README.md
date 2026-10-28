@@ -562,7 +562,24 @@ It exports four packages:
 - `io.github.ralfspoeth.json` — the `Greyson` entry point
 - `io.github.ralfspoeth.json.data` — `JsonValue` and friends
 - `io.github.ralfspoeth.json.io` — `JsonReader`, `JsonWriter`, `JsonParseException`
-- `io.github.ralfspoeth.json.query` — `Pointer`, `Selector`, `Queries`
+- `io.github.ralfspoeth.json.query` — `Pointer`, `Selector`, `Shape`, `Queries`
+
+### Why ship a descriptor at all
+
+Being a kind citizen, mostly. Writing a `module-info.java` costs the author
+something — the test path gets awkward, split packages are out, reflection needs
+`opens` — and almost all of the benefit lands on whoever consumes the library.
+
+Without one, a modular consumer has to take the jar as an automatic module, named
+by guessing from the filename, and cannot `jlink` a runtime image that includes
+it. The library becomes the reason somebody else can't be strict. With one, they
+get a stable name, a dependency graph the compiler checks before anything runs,
+and services declared rather than configured.
+
+It is also the only way to say which packages are *not* API. Greyson's internals
+stay unexported and `Shape`'s implementations are package-private, so both remain
+free to change. That part is a kindness to the author too — but it's the
+enforcement that makes the promise worth anything.
 
 ---
 
