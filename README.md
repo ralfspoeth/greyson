@@ -6,7 +6,7 @@ A small, opinionated JSON library for Java.
 <dependency>
     <groupId>io.github.ralfspoeth</groupId>
     <artifactId>greyson</artifactId>
-    <version>2.3.0</version>
+    <version>2.3.1</version>
 </dependency>
 ```
 
@@ -639,7 +639,7 @@ isn't, the simplicity is worth the trade.
 
 ---
 
-## What's new (unreleased)
+## What's new in 2.3.1
 
 **Fixed: `JsonWriter` was not pretty-printing.** The indented output was
 malformed, in three independent ways: members were separated by `,` with no
@@ -672,6 +672,11 @@ indifferent to whitespace, so malformed indentation reads back as an equal
 document. The tests now assert the expected text — for the `JsonValue`
 overload, on a document whose objects hold one member each, since member order
 there is unspecified and there is otherwise no text to assert.
+
+This is a patch release because the old output was malformed rather than
+merely different — but it *is* different, so a test of your own that asserts
+on `writeValue`'s text will need updating, notably because arrays now break
+across lines. `JsonValue.json()` is unchanged; it remains the single-line form.
 
 ---
 
