@@ -6,7 +6,7 @@ A small, opinionated JSON library for Java.
 <dependency>
     <groupId>io.github.ralfspoeth</groupId>
     <artifactId>greyson</artifactId>
-    <version>2.3.1</version>
+    <version>2.3.2</version>
 </dependency>
 ```
 
@@ -636,6 +636,33 @@ use bespoke streaming parsers, intern strings, and skip allocation in
 the hot path. Greyson allocates an algebraic data type for every node.
 If your bottleneck is JSON parsing throughput, use Jackson. If it
 isn't, the simplicity is worth the trade.
+
+---
+
+## What's new in 2.3.2
+
+**Removed: the escaped-string cache.** `JsonString.escaped` memoised its
+results in an unbounded, never-evicted static `ConcurrentHashMap`. Since
+`json()` sends *values* through it, and values are where cardinality is
+unbounded — ids, UUIDs, timestamps, free text — the map retained every
+distinct string a process ever serialized, for the life of the JVM, with no
+way to clear it. In a server that writes responses derived from a peer's
+request, that is reachable from the network.
+
+It was also caching the cheap half. `escape` is one linear pass;
+`computeIfAbsent` is a linear hash plus a linear `equals` on a hit. The cache
+replaced one scan with two scans and a map probe to save a `StringBuilder`.
+
+What it was missing is the fast path: `escaped` now scans for the first
+character that actually needs escaping and returns the argument itself when
+there is none, which is the overwhelmingly common case and now allocates
+nothing. Only from that index onward is a builder involved, and the clean
+prefix is copied in one block. `json()` also drops `"\"%s\"".formatted(...)`
+for concatenation — building a `Formatter` and parsing a format string per
+string dwarfed the escaping it wrapped.
+
+Callers must no longer assume `escaped` returns a distinct instance. Output is
+unchanged for every input.
 
 ---
 

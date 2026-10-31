@@ -1,8 +1,6 @@
 package io.github.ralfspoeth.json.data;
 
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 import static java.util.Objects.requireNonNull;
 
@@ -21,26 +19,46 @@ public record JsonString(String value) implements Basic<String> {
      */
     @Override
     public String json() {
-        return "\"%s\"".formatted(escaped(value));
+        return "\"" + escaped(value) + "\"";
     }
-
-    private static final ConcurrentMap<String, String> cachedEscaped = new ConcurrentHashMap<>();
 
     /**
      * Obtain the escaped version of the given string {@code s}.
+     *
+     * <p>Most strings contain nothing that needs escaping, and for those the
+     * argument itself is returned: the scan below finds the first character
+     * that does need it, and only then is anything allocated. Callers must not
+     * rely on getting a distinct instance back.
+     *
      * @param s a string, may not be {@code null}
      * @see <a href="http://json.org">json.org</a>
      */
     public static String escaped(String s) {
-        return cachedEscaped.computeIfAbsent(s, JsonString::escape);
+        for (int i = 0; i < s.length(); i++) {
+            if (needsEscape(s.charAt(i))) {
+                return escapeFrom(s, i);
+            }
+        }
+        return s;
     }
 
-    private static String escape(String s) {
-        var sb = new StringBuilder(s.length() * 2);
-        s.chars().forEach(c -> {
-            switch(c) {
+    /*
+     * \b \f \n \r \t are all below 0x20, so the control-character test covers
+     * them; char is unsigned, so no lower bound is needed. Keep in step with
+     * the switch in escapeFrom.
+     */
+    private static boolean needsEscape(char c) {
+        return c == '\\' || c == '"' || c == '/' || c <= 0x1f;
+    }
+
+    // s is clean up to first, so that prefix is copied in one go
+    private static String escapeFrom(String s, int first) {
+        var sb = new StringBuilder(s.length() + 16).append(s, 0, first);
+        for (int i = first; i < s.length(); i++) {
+            var c = s.charAt(i);
+            switch (c) {
                 case '\\' -> sb.append("\\\\");
-                case '\"' -> sb.append("\\\"");
+                case '"' -> sb.append("\\\"");
                 case '/' -> sb.append("\\/");
                 case '\b' -> sb.append("\\b");
                 case '\f' -> sb.append("\\f");
@@ -48,14 +66,15 @@ public record JsonString(String value) implements Basic<String> {
                 case '\r' -> sb.append("\\r");
                 case '\t' -> sb.append("\\t");
                 default -> {
-                    if(0x00 <= c && c <= 0x1F) {
-                        sb.append("\\u%04x".formatted(c));
+                    if (c <= 0x1f) {
+                        // the remaining control characters, rare enough to afford format
+                        sb.append("\\u%04x".formatted((int) c));
                     } else {
-                        sb.append((char)c);
+                        sb.append(c);
                     }
                 }
             }
-        });
+        }
         return sb.toString();
     }
 
