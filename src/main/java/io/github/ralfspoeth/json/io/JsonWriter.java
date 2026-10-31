@@ -6,7 +6,6 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.Writer;
 import java.util.Arrays;
-import java.util.Iterator;
 import java.util.Map;
 
 import static io.github.ralfspoeth.json.data.JsonString.escaped;
@@ -15,6 +14,17 @@ import static java.util.Objects.requireNonNull;
 /**
  * A Writer for JSON values and builders.
  *
+ * <p>The output is indented: four spaces per level, one member or array element
+ * per line, with empty objects and arrays kept on one line as {@code {}} and
+ * {@code []}. For the compact single-line form use {@link JsonValue#json()}
+ * instead.
+ *
+ * <p>Members are written in the order the underlying map yields them, which is
+ * not reordered here and is not the same thing for the two overloads:
+ * {@link Builder.ObjectBuilder} keeps a {@code TreeMap}, so builder output is
+ * by name, while {@link JsonObject} holds a {@link java.util.Map#copyOf} map,
+ * whose iteration order is unspecified. Do not expect two runs over the same
+ * {@code JsonObject} to produce byte-identical text.
  */
 public class JsonWriter implements Closeable {
 
@@ -45,50 +55,58 @@ public class JsonWriter implements Closeable {
         write(requireNonNull(elem), 0);
     }
 
-    // write with a level of indentation
+    /*
+     * Writes el at the cursor's current position: never an indentation before
+     * the opening brace or bracket, since in a member position the cursor
+     * already sits behind {@code "name": }. level is the depth of the line the
+     * cursor is on, so children indent at level + 1 and the closing brace
+     * lines up at level again.
+     */
     private void write(JsonValue el, int level) throws IOException {
         switch (el) {
+            case JsonObject(var members) when members.isEmpty() -> out.append("{}");
             case JsonObject(var members) -> {
-                indent(level);
                 out.append('{').append('\n');
                 var memberIterator = members.entrySet().iterator();
-                if (memberIterator.hasNext()) {
-                    writeMember(level, memberIterator);
-                    while (memberIterator.hasNext()) {
-                        out.append(',');
-                        writeMember(level, memberIterator);
-                    }
-                    out.append('\n');
+                writeMember(memberIterator.next(), level + 1);
+                while (memberIterator.hasNext()) {
+                    out.append(',').append('\n');
+                    writeMember(memberIterator.next(), level + 1);
                 }
+                out.append('\n');
                 indent(level);
                 out.append('}');
             }
+            case JsonArray(var elements) when elements.isEmpty() -> out.append("[]");
             case JsonArray(var elements) -> {
-                indent(level);
-                out.append('[');
+                out.append('[').append('\n');
                 var itemIterator = elements.iterator();
-                if (itemIterator.hasNext()) {
-                    write(itemIterator.next(), level);
-                    while (itemIterator.hasNext()) {
-                        out.append(", ");
-                        write(itemIterator.next(), level);
-                    }
+                writeItem(itemIterator.next(), level + 1);
+                while (itemIterator.hasNext()) {
+                    out.append(',').append('\n');
+                    writeItem(itemIterator.next(), level + 1);
                 }
+                out.append('\n');
+                indent(level);
                 out.append(']');
             }
             case Basic<?> b -> out.append(b.json());
         }
     }
 
-    private void writeMember(int level, Iterator<Map.Entry<String, JsonValue>> memberIterator) throws IOException {
-        var member = memberIterator.next();
-        write(escaped(member.getKey()), member.getValue(), level + 1);
+    private void writeMember(Map.Entry<String, JsonValue> member, int level) throws IOException {
+        write(escaped(member.getKey()), member.getValue(), level);
+    }
+
+    private void writeItem(JsonValue item, int level) throws IOException {
+        indent(level);
+        write(item, level);
     }
 
     private void write(String name, JsonValue elem, int level) throws IOException {
         indent(level);
         out.append('"').append(name).append('"').append(": ");
-        write(elem, level + 1);
+        write(elem, level);
     }
 
     /**
@@ -104,46 +122,48 @@ public class JsonWriter implements Closeable {
     private void write(Builder<? extends JsonValue> builder, int level) throws IOException {
         switch (builder) {
             case Builder.BasicBuilder bb -> write(bb.get(), level);
+            case Builder.ObjectBuilder ob when ob.data().isEmpty() -> out.append("{}");
             case Builder.ObjectBuilder ob -> {
-                indent(level);
                 out.append('{').append('\n');
                 var dataIterator = ob.data().entrySet().iterator();
-                if (dataIterator.hasNext()) {
-                    writeEntry(level, dataIterator);
-                    while (dataIterator.hasNext()) {
-                        out.append(',');
-                        writeEntry(level, dataIterator);
-                    }
-                    out.append('\n');
+                writeEntry(dataIterator.next(), level + 1);
+                while (dataIterator.hasNext()) {
+                    out.append(',').append('\n');
+                    writeEntry(dataIterator.next(), level + 1);
                 }
+                out.append('\n');
                 indent(level);
                 out.append('}');
             }
+            case Builder.ArrayBuilder ab when ab.data().isEmpty() -> out.append("[]");
             case Builder.ArrayBuilder ab -> {
-                indent(level);
-                out.append('[');
+                out.append('[').append('\n');
                 var dataIterator = ab.data().iterator();
-                if (dataIterator.hasNext()) {
-                    write(dataIterator.next(), level);
-                    while (dataIterator.hasNext()) {
-                        out.append(", ");
-                        write(dataIterator.next(), level);
-                    }
+                writeItem(dataIterator.next(), level + 1);
+                while (dataIterator.hasNext()) {
+                    out.append(',').append('\n');
+                    writeItem(dataIterator.next(), level + 1);
                 }
+                out.append('\n');
+                indent(level);
                 out.append(']');
             }
         }
     }
 
-    private void writeEntry(int level, Iterator<Map.Entry<String, Builder<? extends JsonValue>>> memberIterator) throws IOException {
-        var member = memberIterator.next();
-        write(escaped(member.getKey()), member.getValue(), level + 1);
+    private void writeEntry(Map.Entry<String, Builder<? extends JsonValue>> member, int level) throws IOException {
+        write(escaped(member.getKey()), member.getValue(), level);
+    }
+
+    private void writeItem(Builder<? extends JsonValue> item, int level) throws IOException {
+        indent(level);
+        write(item, level);
     }
 
     private void write(String name, Builder<? extends JsonValue> elem, int level) throws IOException {
         indent(level);
         out.append('"').append(name).append('"').append(": ");
-        write(elem, level + 1);
+        write(elem, level);
     }
 
     // used for both builder and value methods

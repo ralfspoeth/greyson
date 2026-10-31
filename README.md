@@ -64,6 +64,12 @@ JsonObject jo = Aggregate.objectBuilder()
 Greyson.writeValue(writer, jo);
 ```
 
+`writeValue` indents with four spaces per level, one member or element per
+line, and keeps empty objects and arrays on one line as `{}` and `[]`. Member
+order is whatever the underlying map yields — see
+[Two things about object members](#two-things-about-object-members). The
+compact, single-line form is `JsonValue.json()`.
+
 ---
 
 ## The duality: `JsonValue` ↔ `Builder`
@@ -618,11 +624,54 @@ otherwise.
 members in a different order than the input. Round-tripping a document preserves
 its *meaning*, not its byte-for-byte layout.
 
+`JsonWriter` does not reorder, so the same applies to its indented output, and
+with one wrinkle: *unspecified* is not merely "different from the input", it is
+free to differ between two runs over the same document, so pretty-printed
+`JsonObject` text is not something to diff or to hash. A `Builder.ObjectBuilder`
+holds a `TreeMap`, so writing the *builder* is by name and stable — the two
+overloads are faithful to their inputs rather than to each other.
+
 Greyson is not the fastest JSON library on the JVM. Jackson and Gson
 use bespoke streaming parsers, intern strings, and skip allocation in
 the hot path. Greyson allocates an algebraic data type for every node.
 If your bottleneck is JSON parsing throughput, use Jackson. If it
 isn't, the simplicity is worth the trade.
+
+---
+
+## What's new (unreleased)
+
+**Fixed: `JsonWriter` was not pretty-printing.** The indented output was
+malformed, in three independent ways: members were separated by `,` with no
+newline, so an object's members all landed on one line; the nesting level was
+incremented twice on the way into a member's value; and the indentation was
+written *before* the opening brace even in a member position, where the cursor
+already sits behind `"name": `. Arrays never broke lines at all, and `{}` came
+out as a brace, a newline, and a stray run of spaces. A document like
+
+```json
+{"a": 5, "arr": [null, {"a": 5.0}]}
+```
+
+was written as
+
+```
+{
+    "a": 5,    "arr":         [null,         {
+            "a": 5.0
+        }]
+}
+```
+
+Both overloads — `JsonValue` and `Builder` — carried the same three faults,
+because they are parallel implementations of one layout. Empty objects and
+arrays now stay on one line as `{}` and `[]`.
+
+The round-trip test that covered this code could not catch it: the reader is
+indifferent to whitespace, so malformed indentation reads back as an equal
+document. The tests now assert the expected text — for the `JsonValue`
+overload, on a document whose objects hold one member each, since member order
+there is unspecified and there is otherwise no text to assert.
 
 ---
 

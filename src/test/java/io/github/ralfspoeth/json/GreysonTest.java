@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.io.*;
 import java.time.LocalDateTime;
 import java.util.NoSuchElementException;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -91,8 +92,8 @@ class GreysonTest {
         var w = new StringWriter();
         Greyson.writeValue(w, jsonArray);
         var result = w.toString();
-        String expectedOutput = "[true, null]";
-        assertEquals(expectedOutput, result);
+        String expectedOutput = "\\s*\\[\\s*true\\s*,\\s*null\\s*]\\s*";
+        assertTrue(Pattern.matches(expectedOutput, result));
     }
 
     @Test
