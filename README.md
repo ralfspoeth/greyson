@@ -11,7 +11,13 @@ A small, opinionated JSON library for Java.
 ```
 
 📖 **[API documentation](https://ralfspoeth.github.io/greyson/)** — published
-from `main` on every change to the public sources.
+from `master` on every change to the public sources.
+
+🎬 **[Interactive walkthrough](https://ralfspoeth.github.io/greyson/walkthrough.html)**
+— the library in five steps, from the data model through `Pointer`, `Selector`
+and `Shape` to JSON-RPC 2.0. The query algebra is re-implemented in JavaScript
+there, so every result and every violation message is computed live from the
+document on the page rather than pasted in. Source: `docs/walkthrough.html`.
 
 No annotations. No reflection. No code generation. Greyson parses JSON
 into immutable algebraic data types and gets out of your way. The whole

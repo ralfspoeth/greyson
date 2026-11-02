@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Greyson — an interactive walkthrough</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #fbfaf8;
+  --panel: #ffffff;
+  --ink: #1d1c1a;
+  --ink-soft: #5b5852;
+  --ink-faint: #8d8880;
+  --rule: #e4e0d9;
+  --accent: #6b4f9c;
+  --accent-soft: #f0ebf8;
+  --good: #2f6b46;
+  --good-soft: #e8f3ec;
+  --bad: #9c3b2e;
+  --bad-soft: #fbece9;
+  --hl: #fdf0c8;
+  --code-bg: #f6f4f0;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 32px 24px 80px; }
+header.masthead { border-bottom: 1px solid var(--rule); padding-bottom: 20px; margin-bottom: 24px; }
+h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: -0.02em; }
+.tagline { color: var(--ink-soft); margin: 0; font-size: 15px; }
+.tagline code { font-family: var(--mono); font-size: 13px; }
+
+nav.acts { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 28px; }
+nav.acts button {
+  font: inherit; font-size: 14px; cursor: pointer;
+  background: var(--panel); color: var(--ink-soft);
+  border: 1px solid var(--rule); border-radius: 999px;
+  padding: 7px 15px; display: flex; align-items: center; gap: 8px;
+  transition: background .12s, color .12s, border-color .12s;
+}
+nav.acts button:hover { border-color: var(--accent); color: var(--ink); }
+nav.acts button[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+nav.acts .n { font-family: var(--mono); font-size: 11px; opacity: .65; }
+
+.layout { display: grid; grid-template-columns: minmax(0,1.25fr) minmax(0,1fr); gap: 28px; align-items: start; }
+/* Narrow — a sidebar panel, say. The document has to stay in view: every
+   number on the page is computed from it, so dropping it below the fold
+   would break the point. It becomes a sticky, scrollable pane on top. */
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; gap: 16px; }
+  .layout > aside { order: -1; position: sticky; top: 0; z-index: 5; margin: 0 -24px; }
+  .layout > aside .panel {
+    position: static; border-radius: 0; border-left: 0; border-right: 0;
+    padding: 12px 24px; box-shadow: 0 6px 14px -12px rgba(0,0,0,.4);
+  }
+  .layout > aside .doc { max-height: 31vh; overflow: auto; }
+}
+
+.act { display: none; }
+.act.on { display: block; }
+.act h2 { font-size: 21px; margin: 0 0 4px; letter-spacing: -0.01em; }
+.act .sub { color: var(--ink-faint); font-size: 13px; margin: 0 0 18px; font-family: var(--mono); }
+.act p { margin: 0 0 14px; }
+.act p.note { color: var(--ink-soft); font-size: 14px; border-left: 2px solid var(--rule); padding-left: 14px; }
+.act strong { font-weight: 650; }
+code { font-family: var(--mono); font-size: 13.5px; background: var(--code-bg); padding: 1px 4px; border-radius: 3px; }
+
+pre.java {
+  font-family: var(--mono); font-size: 13px; line-height: 1.65;
+  background: var(--code-bg); border: 1px solid var(--rule); border-radius: 8px;
+  padding: 14px 16px; overflow-x: auto; margin: 0 0 18px;
+}
+pre.java .k { color: var(--accent); }
+pre.java .s { color: var(--good); }
+pre.java .c { color: var(--ink-faint); font-style: italic; }
+
+.panel { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 16px; margin: 0 0 18px; }
+.panel > h3 {
+  font-size: 11px; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--ink-faint); margin: 0 0 12px; font-weight: 600;
+}
+.sticky { position: sticky; top: 20px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
+.chips button {
+  font-family: var(--mono); font-size: 12px; cursor: pointer;
+  background: var(--bg); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 5px 9px; color: var(--ink-soft);
+}
+.chips button:hover { border-color: var(--accent); color: var(--ink); }
+.chips button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+input[type=text] {
+  font-family: var(--mono); font-size: 13px; width: 100%;
+  padding: 9px 11px; border: 1px solid var(--rule); border-radius: 7px;
+  background: var(--bg); color: var(--ink);
+}
+input[type=text]:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+
+.result { font-family: var(--mono); font-size: 13px; margin-top: 12px; }
+.result .line { padding: 5px 0; border-top: 1px solid var(--rule); }
+.result .line:first-child { border-top: 0; }
+.label { color: var(--ink-faint); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }
+.val { color: var(--ink); }
+.ok { color: var(--good); }
+.no { color: var(--bad); }
+.empty { color: var(--ink-faint); font-style: italic; }
+
+ul.violations { list-style: none; margin: 10px 0 0; padding: 0; font-family: var(--mono); font-size: 12.5px; }
+ul.violations li { background: var(--bad-soft); border-left: 3px solid var(--bad); padding: 7px 10px; margin-bottom: 6px; border-radius: 0 5px 5px 0; }
+ul.violations li .at { color: var(--bad); font-weight: 600; }
+.verdict { font-family: var(--mono); font-size: 13px; padding: 8px 11px; border-radius: 6px; margin-top: 10px; }
+.verdict.good { background: var(--good-soft); color: var(--good); }
+.verdict.bad { background: var(--bad-soft); color: var(--bad); }
+
+.toggles { display: flex; flex-direction: column; gap: 8px; }
+.toggles label { display: flex; gap: 9px; align-items: flex-start; font-size: 13.5px; cursor: pointer; color: var(--ink-soft); }
+.toggles input { margin-top: 4px; }
+
+.doc { font-family: var(--mono); font-size: 12.5px; line-height: 1.75; overflow-x: auto; }
+.doc .node { display: block; white-space: pre; }
+.doc .key { color: var(--accent); }
+.doc .str { color: var(--good); }
+.doc .num { color: #9a5b12; }
+.doc .lit { color: var(--ink-faint); }
+.doc .punct { color: var(--ink-faint); }
+.doc .hit { background: var(--hl); border-radius: 3px; box-shadow: 0 0 0 2px var(--hl); }
+.doc .flag { background: var(--bad-soft); border-radius: 3px; box-shadow: 0 0 0 2px var(--bad-soft); }
+.doc .type { color: var(--ink-faint); font-size: 11px; }
+
+table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 0 0 18px; }
+table.tbl th, table.tbl td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+table.tbl th { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-faint); font-weight: 600; }
+table.tbl td code { background: none; padding: 0; }
+
+.msglist { display: flex; flex-direction: column; gap: 6px; }
+.msglist button {
+  font-family: var(--mono); font-size: 12px; text-align: left; cursor: pointer;
+  background: var(--bg); border: 1px solid var(--rule); border-radius: 7px;
+  padding: 8px 10px; color: var(--ink-soft); line-height: 1.5;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.msglist button:hover { border-color: var(--accent); }
+.msglist button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); white-space: normal; }
+
+footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--rule); color: var(--ink-faint); font-size: 13px; }
+footer a { color: var(--accent); }
+.pager { display: flex; justify-content: space-between; margin-top: 28px; gap: 12px; }
+.pager button {
+  font: inherit; font-size: 14px; cursor: pointer; background: var(--panel);
+  border: 1px solid var(--rule); border-radius: 7px; padding: 9px 16px; color: var(--ink-soft);
+}
+.pager button:hover:not(:disabled) { border-color: var(--accent); color: var(--ink); }
+.pager button:disabled { opacity: .35; cursor: default; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Greyson, in five steps</h1>
+  <p class="tagline">Parse &rarr; <code>Pointer</code> &rarr; <code>Selector</code> &rarr; <code>Shape</code> &rarr; a real specification. Every result on this page is computed live from the document in the pane alongside &mdash; nothing here is a canned screenshot.</p>
+</header>
+
+<nav class="acts" id="nav"></nav>
+
+<div class="layout">
+  <main>
+
+    <!-- ACT 1 -->
+    <section class="act" data-act="0">
+      <h2>The document is a value</h2>
+      <p class="sub">JsonValue &mdash; a sealed hierarchy of records</p>
+      <p>Parsing gives you back a tree of records, and the hierarchy is <strong>sealed</strong>: six concrete types, no more, ever. That is the whole point — the compiler can prove a <code>switch</code> over it is exhaustive, so there is no <code>else</code> branch to forget and no <code>instanceof</code> ladder to keep in step with a growing type set.</p>
+      <pre class="java"><span class="k">var</span> doc = Greyson.readValue(reader).orElseThrow();
+
+<span class="c">// exhaustive — add a case and the compiler tells you where</span>
+<span class="k">int</span> depth = <span class="k">switch</span> (doc) {
+    <span class="k">case</span> JsonObject(<span class="k">var</span> members) -&gt; 1 + members.values().stream()...
+    <span class="k">case</span> JsonArray(<span class="k">var</span> elements) -&gt; 1 + elements.stream()...
+    <span class="k">case</span> Basic&lt;?&gt; _ -&gt; 0
+};</pre>
+      <table class="tbl">
+        <thead><tr><th>Type</th><th>Holds</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td><code>JsonObject</code></td><td><code>Map&lt;String, JsonValue&gt;</code></td><td>also a <code>Function&lt;String, JsonValue&gt;</code></td></tr>
+          <tr><td><code>JsonArray</code></td><td><code>List&lt;JsonValue&gt;</code></td><td>also an <code>IntFunction&lt;JsonValue&gt;</code></td></tr>
+          <tr><td><code>JsonString</code></td><td><code>String</code></td><td></td></tr>
+          <tr><td><code>JsonNumber</code></td><td><code>BigDecimal</code></td><td>never <code>double</code> — <code>18250.00</code> round-trips exactly</td></tr>
+          <tr><td><code>JsonBoolean</code></td><td><code>boolean</code></td><td></td></tr>
+          <tr><td><code>JsonNull</code></td><td>&mdash;</td><td>a value, not a <code>null</code> reference</td></tr>
+        </tbody>
+      </table>
+      <div class="panel">
+        <h3>Click any node in the document</h3>
+        <div class="result" id="a1out"><span class="empty">Nothing selected yet.</span></div>
+      </div>
+      <p class="note">Numbers are <code>BigDecimal</code> because binary floating point loses digits that JSON kept. Equality is still numeric, so <code>18250.00</code> equals <code>18250</code> — but serialization preserves what was written.</p>
+    </section>
+
+    <!-- ACT 2 -->
+    <section class="act" data-act="1">
+      <h2>One value: <code>Pointer</code></h2>
+      <p class="sub">Pointer = JsonValue &rarr; Optional&lt;JsonValue&gt;</p>
+      <p>A <code>Pointer</code> answers <em>where is this one value?</em> Build it segment by segment, or parse a slash-separated path. A miss is an empty <code>Optional</code>, not an exception — because in data from the wild, a miss is a normal outcome.</p>
+      <pre class="java"><span class="k">var</span> p = Pointer.self().member(<span class="s">"portfolio"</span>).member(<span class="s">"owner"</span>);
+<span class="k">var</span> q = Pointer.parse(<span class="s">"portfolio/owner"</span>);        <span class="c">// equivalent</span>
+
+String owner = q.stringValue(doc).orElse(<span class="s">"unknown"</span>);
+String must  = q.stringOrThrow(doc);  <span class="c">// names the pointer when it misses</span></pre>
+      <div class="panel">
+        <h3>Resolve a path</h3>
+        <div class="chips" id="a2chips"></div>
+        <input type="text" id="a2input" spellcheck="false" aria-label="Pointer path">
+        <div class="result" id="a2out"></div>
+      </div>
+      <table class="tbl">
+        <thead><tr><th>Segment</th><th>Means</th></tr></thead>
+        <tbody>
+          <tr><td><code>name</code></td><td>an object member, by literal key</td></tr>
+          <tr><td><code>[n]</code></td><td>an array index; <code>[-1]</code> counts from the end</td></tr>
+          <tr><td><code>#regex</code></td><td>an object member by pattern; smallest matching key wins</td></tr>
+        </tbody>
+      </table>
+      <p class="note">RFC 6901 strings work too, via <code>Pointer.fromJsonPointer("/portfolio/positions/0/isin")</code> — so pointers emitted by JSON Patch or OpenAPI drop straight in. And a <code>Pointer</code> writes as well as reads: <code>set</code> and <code>remove</code> operate on a <code>Builder</code>, never on the immutable value.</p>
+    </section>
+
+    <!-- ACT 3 -->
+    <section class="act" data-act="2">
+      <h2>Many values: <code>Selector</code></h2>
+      <p class="sub">Selector = JsonValue &rarr; Stream&lt;JsonValue&gt;</p>
+      <p>Where a <code>Pointer</code> answers <em>which one</em>, a <code>Selector</code> answers <em>which ones</em>. It returns a <code>Stream</code>, so it plugs into <code>flatMap</code> and the rest of the standard library — there is no bespoke pipeline to learn.</p>
+      <pre class="java">Stream.of(doc)
+      .flatMap(Pointer.parse(<span class="s">"portfolio/positions"</span>).select(Selector.all()))
+      .flatMap(Selector.all().point(Pointer.self().member(<span class="s">"ccy"</span>)))
+      .forEach(System.out::println);</pre>
+      <div class="panel">
+        <h3>Pick a pipeline</h3>
+        <div class="chips" id="a3chips"></div>
+        <div class="result" id="a3out"></div>
+      </div>
+      <p>The two types bridge in both directions, which is what keeps a query inside the algebra instead of spilling into ad-hoc loops:</p>
+      <table class="tbl">
+        <tbody>
+          <tr><td><code>pointer.select(selector)</code></td><td>go to one place, then fan out</td></tr>
+          <tr><td><code>selector.point(pointer)</code></td><td>fan out, then narrow each result</td></tr>
+          <tr><td><code>selector.where(shape)</code></td><td>keep only the results of a given shape</td></tr>
+        </tbody>
+      </table>
+      <p class="note">A <code>Selector</code> filters by <em>type</em> — <code>objects()</code>, <code>numbers()</code>, <code>strings()</code>. The next act filters by <em>shape</em>.</p>
+    </section>
+
+    <!-- ACT 4 -->
+    <section class="act" data-act="3">
+      <h2>What is wrong, and where: <code>Shape</code></h2>
+      <p class="sub">Shape = JsonValue &rarr; Stream&lt;Violation&gt;</p>
+      <p>A <code>Shape</code> describes a value's structure. Apply it and you get the defects — so an <strong>empty stream means the value is fine</strong>. That inversion is the whole design: a boolean can only say "no", and "no" is useless when you have a thousand records and need to know which three are broken and why.</p>
+      <pre class="java"><span class="k">var</span> POSITION = member(<span class="s">"isin"</span>, string())
+        .and(member(<span class="s">"ccy"</span>, matching(<span class="s">"[A-Z]{3}"</span>)))
+        .and(member(<span class="s">"amount"</span>, number()));
+
+Pointer.parse(<span class="s">"portfolio/positions"</span>)
+       .must(each(POSITION))
+       .violations(doc)
+       .forEach(System.out::println);</pre>
+      <div class="panel">
+        <h3>Violations, computed live</h3>
+        <div id="a4out"></div>
+        <div style="margin-top:14px">
+          <h3>Repair the document and watch them go</h3>
+          <div class="toggles" id="a4toggles"></div>
+        </div>
+      </div>
+      <p>Naming a member <em>is</em> requiring it. Either you care about a member — and then about its value — or you do not mention it. <code>optional</code> covers the third case, where absence is fine but a present value still has to fit.</p>
+      <table class="tbl">
+        <tbody>
+          <tr><td><code>member("ccy", string())</code></td><td><code>ccy</code> is there, and is a string</td></tr>
+          <tr><td><code>optional("ccy", string())</code></td><td><em>if</em> <code>ccy</code> is there, it is a string</td></tr>
+          <tr><td><code>exact(Basic.of("2.0"))</code></td><td>equals <code>"2.0"</code> — for discriminators</td></tr>
+          <tr><td><code>exactlyOne(Map.of(...))</code></td><td>exactly one of these members, satisfying its shape</td></tr>
+          <tr><td><code>each(number())</code></td><td>an array whose every element is a number</td></tr>
+          <tr><td><code>a.or(b)</code></td><td>either holds — for union-typed fields</td></tr>
+        </tbody>
+      </table>
+      <p class="note">A shape is a value: immutable, comparable, usable as a map key, and printable via <code>explain()</code>. The same shape that produced the report above also yields a <code>predicate()</code> for <code>Stream::filter</code> — and because the violation stream is lazy, the predicate stops at the first defect and never builds a message it will not use.</p>
+    </section>
+
+    <!-- ACT 5 -->
+    <section class="act" data-act="4">
+      <h2>A real specification</h2>
+      <p class="sub">JSON-RPC 2.0, &sect;4 and &sect;5</p>
+      <p>This is the case Greyson was built for. The <a href="https://www.jsonrpc.org/specification">JSON-RPC 2.0</a> rules are not merely "these members, those types". <code>jsonrpc</code> must equal the <em>literal</em> <code>"2.0"</code>. <code>id</code> is optional <em>but constrained</em> — and absence carries meaning: no <code>id</code> makes the message a notification, and no response is owed. So conflating "absent" with "present but malformed" is not leniency; it turns a request into a notification and leaves the peer waiting for a reply that never comes.</p>
+      <pre class="java"><span class="k">static final</span> Shape REQUEST = member(<span class="s">"jsonrpc"</span>, exact(Basic.of(<span class="s">"2.0"</span>)))
+        .and(member(<span class="s">"method"</span>, string()))
+        .and(optional(<span class="s">"id"</span>, string().or(number()).or(nul())))
+        .and(optional(<span class="s">"params"</span>, array().or(object())));
+
+<span class="c">// result and error are mutually exclusive — never both, never neither</span>
+<span class="k">static final</span> Shape RESPONSE = member(<span class="s">"jsonrpc"</span>, exact(Basic.of(<span class="s">"2.0"</span>)))
+        .and(member(<span class="s">"id"</span>, string().or(WHOLE).or(nul())))
+        .and(exactlyOne(Map.of(<span class="s">"result"</span>, anything(), <span class="s">"error"</span>, ERROR)));</pre>
+      <div class="panel">
+        <h3>Pick a message</h3>
+        <div class="msglist" id="a5list"></div>
+        <div id="a5out" style="margin-top:14px"></div>
+      </div>
+      <p>The whole specification is one value, and it prints itself back:</p>
+      <pre class="java" id="a5explain"></pre>
+      <p class="note">Turned around, the same shape becomes a <strong>conformance oracle</strong>: rather than asserting a particular response for a particular request, assert that <em>whatever</em> the processor emits satisfies <code>RESPONSE</code>, down every path. That is the assertion that catches an invalid request producing no response at all — because "nothing" is not a response object.</p>
+    </section>
+
+    <div class="pager">
+      <button id="prev">&larr; Back</button>
+      <button id="next">Next &rarr;</button>
+    </div>
+  </main>
+
+  <aside>
+    <div class="panel sticky">
+      <h3 id="docTitle">The document</h3>
+      <div class="doc" id="doc"></div>
+    </div>
+  </aside>
+</div>
+
+<footer>
+  Greyson 2.3.2 &mdash; <a href="https://github.com/ralfspoeth/greyson">github.com/ralfspoeth/greyson</a> &middot;
+  <a href="https://ralfspoeth.github.io/greyson/">API docs</a>.
+  The query engine behind this page is a faithful re-implementation in JavaScript, including the violation wording; it is a teaching aid, not the library.
+</footer>
+</div>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ *
+ * The document everything on this page is computed from.
+ * ------------------------------------------------------------------ */
+const BASE = {
+  portfolio: {
+    owner: "Ada Lovelace",
+    positions: [
+      { isin: "US0378331005", ccy: "USD", amount: 120 },
+      { isin: "DE0007164600", ccy: "EUR", amount: "75" },
+      { ccy: "GBP", amount: 40 }
+    ]
+  }
+};
+const MISSING = Symbol("missing");
+const clone = v => JSON.parse(JSON.stringify(v));
+
+/* The two repairs act 4 offers. */
+const fixes = { amount: false, isin: false };
+function currentDoc() {
+  const d = clone(BASE);
+  if (fixes.amount) d.portfolio.positions[1].amount = 75;
+  if (fixes.isin) d.portfolio.positions[2] = { isin: "GB0002634946", ccy: "GBP", amount: 40 };
+  return d;
+}
+
+/* ------------------------------------------------------------------ *
+ * JsonValue vocabulary.  typeName() mirrors the library: a boolean
+ * answers "true"/"false", because JSON names literals rather than
+ * defining a boolean type.
+ * ------------------------------------------------------------------ */
+const isObj = v => v !== null && typeof v === "object" && !Array.isArray(v);
+function typeName(v) {
+  if (v === null) return "null";
+  if (Array.isArray(v)) return "array";
+  switch (typeof v) {
+    case "string": return "string";
+    case "number": return "number";
+    case "boolean": return String(v);
+    default: return "object";
+  }
+}
+function javaType(v) {
+  if (v === null) return "JsonNull";
+  if (Array.isArray(v)) return "JsonArray";
+  switch (typeof v) {
+    case "string": return "JsonString";
+    case "number": return "JsonNumber";
+    case "boolean": return "JsonBoolean";
+    default: return "JsonObject";
+  }
+}
+/* json() — the compact single-line form. */
+function json(v) {
+  if (v === MISSING) return "nothing";
+  if (v === null) return "null";
+  if (Array.isArray(v)) return "[" + v.map(json).join(", ") + "]";
+  if (isObj(v)) return "{" + Object.entries(v).map(([k, x]) => '"' + k + '": ' + json(x)).join(", ") + "}";
+  if (typeof v === "string") return '"' + v + '"';
+  return String(v);
+}
+
+/* ------------------------------------------------------------------ *
+ * Pointer
+ * ------------------------------------------------------------------ */
+function parsePointer(path) {
+  return String(path).split("/").filter(s => s.length > 0).map(seg => {
+    if (/^\[-?\d+\]$/.test(seg)) return { kind: "index", n: parseInt(seg.slice(1, -1), 10) };
+    if (seg.startsWith("#")) return { kind: "regex", re: seg.slice(1) };
+    return { kind: "member", name: seg };
+  });
+}
+/* Returns {value, path} where path is the concrete location reached, so a
+   #regex segment can report which key it actually picked. */
+function resolve(doc, path) {
+  let cur = doc, reached = [];
+  for (const seg of parsePointer(path)) {
+    if (seg.kind === "member") {
+      if (!isObj(cur) || !Object.prototype.hasOwnProperty.call(cur, seg.name)) return { value: MISSING };
+      cur = cur[seg.name]; reached.push(seg.name);
+    } else if (seg.kind === "index") {
+      if (!Array.isArray(cur)) return { value: MISSING };
+      const i = seg.n < 0 ? cur.length + seg.n : seg.n;
+      if (i < 0 || i >= cur.length) return { value: MISSING };
+      cur = cur[i]; reached.push("[" + i + "]");
+    } else {
+      if (!isObj(cur)) return { value: MISSING };
+      let re;
+      try { re = new RegExp("^(?:" + seg.re + ")$"); } catch (e) { return { value: MISSING, bad: true }; }
+      const keys = Object.keys(cur).filter(k => re.test(k)).sort();
+      if (!keys.length) return { value: MISSING };
+      cur = cur[keys[0]]; reached.push(keys[0]);
+    }
+  }
+  return { value: cur, path: reached.join("/") };
+}
+
+/* ------------------------------------------------------------------ *
+ * Shape.  Each shape is {explain(), apply(value) -> [{at, message}]}.
+ * "at" is a path string relative to the value the shape was applied to.
+ * ------------------------------------------------------------------ */
+/* either side may be empty: a leaf violation sits at "" relative to the
+   shape that produced it, and rebasing must not leave a dangling slash */
+const join = (base, seg) => (base && seg) ? base + "/" + seg : (base || seg);
+const rebase = (vs, seg) => vs.map(v => ({ at: join(seg, v.at), message: v.message }));
+const expected = (wanted, found) => [{ at: "", message: "expected " + wanted + ", got " + found }];
+
+function shape(explain, apply) { return { explain: () => explain, apply }; }
+
+const S = {
+  anything: () => shape("anything", () => []),
+  nothing: () => shape("nothing", v => expected("nothing", typeName(v))),
+  type: (word, test) => shape(word, v => test(v) ? [] : expected(word, typeName(v))),
+  string: () => S.type("string", v => typeof v === "string"),
+  number: () => S.type("number", v => typeof v === "number"),
+  bool: () => S.type("true|false", v => typeof v === "boolean"),
+  nul: () => S.type("null", v => v === null),
+  object: () => S.type("object", isObj),
+  array: () => S.type("array", Array.isArray),
+
+  /* what is "found" here is the value, not its type: being a string is no
+     defect when the complaint is that the string is the wrong one */
+  exact: lit => shape(json(lit), v => json(v) === json(lit) ? [] : expected(json(lit), json(v))),
+  /* being a string is a precondition, so string() phrases that complaint */
+  matching: re => {
+    const text = "a string matching /" + re + "/";
+    return shape(text, v => {
+      if (typeof v !== "string") return S.string().apply(v);
+      return new RegExp("^(?:" + re + ")$").test(v) ? [] : expected(text, json(v));
+    });
+  },
+  satisfying: (desc, pred) => shape(desc, v => pred(v) ? [] : expected(desc, json(v))),
+
+  /* being an object is a precondition these share with object(), so that
+     shape phrases the complaint rather than repeating it */
+  member: (key, inner) => shape('"' + key + '": ' + inner.explain(), v => {
+    if (!isObj(v)) return S.object().apply(v);
+    if (!Object.prototype.hasOwnProperty.call(v, key)) return [{ at: key, message: "missing required member" }];
+    return rebase(inner.apply(v[key]), key);
+  }),
+  optional: (key, inner) => shape('"' + key + '"?: ' + inner.explain(), v => {
+    if (!isObj(v)) return S.object().apply(v);
+    if (!Object.prototype.hasOwnProperty.call(v, key)) return [];
+    return rebase(inner.apply(v[key]), key);
+  }),
+  each: inner => shape("each element " + inner.explain(), v => {
+    if (!Array.isArray(v)) return S.array().apply(v);
+    return v.flatMap((el, i) => rebase(inner.apply(el), "[" + i + "]"));
+  }),
+  /* settle presence first: it decides which of the three outcomes we are in
+     before any alternative's shape is evaluated */
+  exactlyOne: alts => {
+    const keys = Object.keys(alts).sort();
+    const quoted = ks => ks.map(k => '"' + k + '"').join(", ");
+    return shape("exactly one of " + keys.map(k => '"' + k + '": ' + alts[k].explain()).join(", "), v => {
+      if (!isObj(v)) return S.object().apply(v);
+      const present = keys.filter(k => Object.prototype.hasOwnProperty.call(v, k));
+      if (present.length === 1) return rebase(alts[present[0]].apply(v[present[0]]), present[0]);
+      return expected("exactly one of " + quoted(keys), present.length ? quoted(present) : "none");
+    });
+  },
+  and: (...parts) => shape(parts.map(p => p.explain()).join(" and "),
+    v => parts.flatMap(p => p.apply(v))),
+  /* one violation at the choice point; branch violations are dropped
+     deliberately, so an unsatisfied choice reads as one problem */
+  or: (...parts) => {
+    const text = parts.length === 1 ? parts[0].explain() : "(" + parts.map(p => p.explain()).join(" or ") + ")";
+    return shape(text, v => parts.some(p => p.apply(v).length === 0) ? [] : expected(text, typeName(v)));
+  },
+  /* Pointer.must(shape) — an unresolved pointer is itself a violation,
+     because a shape's whole job is to complain */
+  must: (path, inner) => shape(path + " " + inner.explain(), v => {
+    const r = resolve(v, path);
+    if (r.value === MISSING) return [{ at: path, message: "no value at this location" }];
+    return rebase(inner.apply(r.value), path);
+  })
+};
+const vstr = v => (v.at || "<root>") + ": " + v.message;
+
+/* ------------------------------------------------------------------ *
+ * Document pane: render with a data-path on every node so the acts can
+ * highlight whatever they just matched.
+ * ------------------------------------------------------------------ */
+const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function renderDoc(v, path, indent, keyLabel, trailing) {
+  const pad = "  ".repeat(indent);
+  const key = keyLabel === null ? "" : '<span class="key">"' + esc(keyLabel) + '"</span><span class="punct">: </span>';
+  const tail = trailing ? '<span class="punct">,</span>' : "";
+  const open = (brace, close) => {
+    const entries = Array.isArray(v)
+      ? v.map((x, i) => [null, x, path ? path + "/[" + i + "]" : "[" + i + "]"])
+      : Object.entries(v).map(([k, x]) => [k, x, path ? path + "/" + k : k]);
+    let html = '<span class="node" data-path="' + esc(path) + '">' + pad + key + '<span class="punct">' + brace + "</span></span>";
+    entries.forEach(([k, x, p], i) => { html += renderDoc(x, p, indent + 1, k, i < entries.length - 1); });
+    html += '<span class="node">' + pad + '<span class="punct">' + close + "</span>" + tail + "</span>";
+    return html;
+  };
+  if (Array.isArray(v)) return open("[", "]");
+  if (isObj(v)) return open("{", "}");
+  let lit;
+  if (v === null) lit = '<span class="lit">null</span>';
+  else if (typeof v === "string") lit = '<span class="str">"' + esc(v) + '"</span>';
+  else if (typeof v === "number") lit = '<span class="num">' + esc(v) + "</span>";
+  else lit = '<span class="lit">' + esc(v) + "</span>";
+  return '<span class="node" data-path="' + esc(path) + '">' + pad + key + lit + tail + "</span>";
+}
+const docEl = document.getElementById("doc");
+function paintDoc(value) {
+  docEl.innerHTML = renderDoc(value, "", 0, null, false);
+}
+function mark(paths, cls) {
+  docEl.querySelectorAll(".hit,.flag").forEach(n => n.classList.remove("hit", "flag"));
+  const nodes = [...docEl.querySelectorAll("[data-path]")];
+  const live = new Set(nodes.map(n => n.getAttribute("data-path")));
+  /* A missing-member violation addresses a slot that is not in the document,
+     so there is no node to highlight. Walk up to the nearest ancestor that
+     does exist — the container at fault — rather than highlighting nothing. */
+  const want = new Set();
+  paths.filter(p => p !== undefined && p !== null).forEach(p => {
+    let segs = p.split("/").filter(Boolean);
+    for (;;) {
+      const candidate = segs.join("/");
+      if (live.has(candidate)) { want.add(candidate); return; }
+      if (!segs.length) return;
+      segs.pop();
+    }
+  });
+  nodes.forEach(n => { if (want.has(n.getAttribute("data-path"))) n.classList.add(cls); });
+}
+
+/* ------------------------------------------------------------------ *
+ * Act 1 — click a node, learn its Java type
+ * ------------------------------------------------------------------ */
+const a1out = document.getElementById("a1out");
+docEl.addEventListener("click", e => {
+  if (act !== 0) return;
+  const node = e.target.closest("[data-path]");
+  if (!node) return;
+  const path = node.getAttribute("data-path");
+  const r = resolve(currentDoc(), path);
+  if (r.value === MISSING) return;
+  mark([path], "hit");
+  a1out.innerHTML =
+    '<div class="line"><span class="label">path</span> <span class="val">' + esc(path || "<root>") + "</span></div>" +
+    '<div class="line"><span class="label">java type</span> <span class="val ok">' + javaType(r.value) + "</span></div>" +
+    '<div class="line"><span class="label">typeName()</span> <span class="val">' + esc(typeName(r.value)) + "</span></div>" +
+    '<div class="line"><span class="label">json()</span> <span class="val">' + esc(json(r.value)) + "</span></div>";
+});
+
+/* ------------------------------------------------------------------ *
+ * Act 2 — Pointer
+ * ------------------------------------------------------------------ */
+const A2 = ["portfolio/owner", "portfolio/positions/[0]/isin", "portfolio/positions/[-1]/ccy",
+            "portfolio/positions/[0]/#is.*", "portfolio/positions/[9]/isin"];
+const a2input = document.getElementById("a2input");
+const a2out = document.getElementById("a2out");
+const a2chips = document.getElementById("a2chips");
+A2.forEach(p => {
+  const b = document.createElement("button");
+  b.textContent = p; b.onclick = () => { a2input.value = p; runA2(); };
+  a2chips.appendChild(b);
+});
+function runA2() {
+  const path = a2input.value;
+  [...a2chips.children].forEach(b => b.setAttribute("aria-pressed", String(b.textContent === path)));
+  const r = resolve(currentDoc(), path);
+  if (r.value === MISSING) {
+    mark([], "hit");
+    a2out.innerHTML =
+      '<div class="line"><span class="label">Pointer.parse(…).apply(doc)</span> <span class="val empty">Optional.empty</span></div>' +
+      '<div class="line"><span class="label">…stringOrThrow(doc)</span> <span class="val no">NoSuchElementException: no value at ' + esc(path) + "</span></div>";
+    return;
+  }
+  mark([r.path], "hit");
+  const extra = r.path !== path.split("/").filter(Boolean).join("/")
+    ? '<div class="line"><span class="label">resolved to</span> <span class="val">' + esc(r.path) + "</span></div>" : "";
+  a2out.innerHTML =
+    '<div class="line"><span class="label">Optional&lt;JsonValue&gt;</span> <span class="val ok">Optional[' + esc(json(r.value)) + "]</span></div>" +
+    extra +
+    '<div class="line"><span class="label">type</span> <span class="val">' + javaType(r.value) + "</span></div>";
+}
+a2input.addEventListener("input", runA2);
+
+/* ------------------------------------------------------------------ *
+ * Act 3 — Selector
+ * ------------------------------------------------------------------ */
+const POSITIONS = "portfolio/positions";
+const A3 = [
+  { label: 'parse("portfolio/positions").select(all())',
+    run: d => resolve(d, POSITIONS).value.map((v, i) => ({ v, path: POSITIONS + "/[" + i + "]" })) },
+  { label: '…select(all()).point(self().member("ccy"))',
+    run: d => resolve(d, POSITIONS).value.map((v, i) => ({ v: v.ccy, path: POSITIONS + "/[" + i + "]/ccy" })) },
+  { label: '…select(range(0, 2))',
+    run: d => resolve(d, POSITIONS).value.slice(0, 2).map((v, i) => ({ v, path: POSITIONS + "/[" + i + "]" })) },
+  { label: '…select(all()).point(self().member("amount")).numbers()',
+    run: d => resolve(d, POSITIONS).value
+      .map((v, i) => ({ v: v.amount, path: POSITIONS + "/[" + i + "]/amount" }))
+      .filter(x => typeof x.v === "number") },
+  { label: 'parse("portfolio/positions/[0]").select(regex("i.*"))',
+    run: d => Object.entries(resolve(d, POSITIONS + "/[0]").value)
+      .filter(([k]) => /^(?:i.*)$/.test(k))
+      .map(([k, v]) => ({ v, path: POSITIONS + "/[0]/" + k })) },
+  { label: '…select(all().where(POSITION))  ← filters by shape',
+    run: d => resolve(d, POSITIONS).value
+      .map((v, i) => ({ v, path: POSITIONS + "/[" + i + "]" }))
+      .filter(x => POSITION.apply(x.v).length === 0) }
+];
+const a3chips = document.getElementById("a3chips");
+const a3out = document.getElementById("a3out");
+let a3sel = 0;
+A3.forEach((p, i) => {
+  const b = document.createElement("button");
+  b.textContent = p.label; b.onclick = () => { a3sel = i; runA3(); };
+  a3chips.appendChild(b);
+});
+function runA3() {
+  [...a3chips.children].forEach((b, i) => b.setAttribute("aria-pressed", String(i === a3sel)));
+  const out = A3[a3sel].run(currentDoc());
+  mark(out.map(x => x.path), "hit");
+  a3out.innerHTML =
+    '<div class="line"><span class="label">' + out.length + " element(s)</span></div>" +
+    (out.length
+      ? out.map(x => '<div class="line"><span class="val">' + esc(json(x.v)) + "</span></div>").join("")
+      : '<div class="line"><span class="empty">empty stream</span></div>');
+}
+
+/* ------------------------------------------------------------------ *
+ * Act 4 — Shape
+ * ------------------------------------------------------------------ */
+const POSITION = S.and(
+  S.member("isin", S.string()),
+  S.member("ccy", S.matching("[A-Z]{3}")),
+  S.member("amount", S.number())
+);
+const PORTFOLIO = S.must(POSITIONS, S.each(POSITION));
+const a4out = document.getElementById("a4out");
+const a4toggles = document.getElementById("a4toggles");
+[["amount", 'Make <code>positions/[1]/amount</code> the number <code>75</code> instead of the string <code>"75"</code>'],
+ ["isin", "Give the third position the <code>isin</code> it is missing"]].forEach(([key, text]) => {
+  const l = document.createElement("label");
+  l.innerHTML = '<input type="checkbox" data-fix="' + key + '"><span>' + text + "</span>";
+  a4toggles.appendChild(l);
+});
+a4toggles.addEventListener("change", e => {
+  fixes[e.target.getAttribute("data-fix")] = e.target.checked;
+  paintDoc(currentDoc());
+  runA4();
+});
+function runA4() {
+  const d = currentDoc();
+  const vs = PORTFOLIO.apply(d);
+  mark(vs.map(v => v.at), "flag");
+  a4out.innerHTML =
+    '<div class="result"><div class="line"><span class="label">explain()</span> <span class="val">' + esc(POSITION.explain()) + "</span></div></div>" +
+    (vs.length
+      ? '<ul class="violations">' + vs.map(v =>
+          '<li><span class="at">' + esc(v.at || "<root>") + "</span>: " + esc(v.message) + "</li>").join("") + "</ul>"
+      : '<div class="verdict good">No violations — every position satisfies the shape.</div>');
+}
+
+/* ------------------------------------------------------------------ *
+ * Act 5 — JSON-RPC 2.0
+ * ------------------------------------------------------------------ */
+const WHOLE = S.satisfying("a whole number", v => typeof v === "number" && Number.isInteger(v));
+const ERROR = S.and(
+  S.member("code", WHOLE),
+  S.member("message", S.string()),
+  S.optional("data", S.anything())
+);
+const REQUEST = S.and(
+  S.member("jsonrpc", S.exact("2.0")),
+  S.member("method", S.string()),
+  S.optional("id", S.or(S.string(), S.number(), S.nul())),
+  S.optional("params", S.or(S.array(), S.object()))
+);
+const RESPONSE = S.and(
+  S.member("jsonrpc", S.exact("2.0")),
+  S.member("id", S.or(S.string(), WHOLE, S.nul())),
+  S.exactlyOne({ result: S.anything(), error: ERROR })
+);
+const MESSAGES = [
+  { kind: "request", note: "a well-formed call", v: { jsonrpc: "2.0", method: "subtract", params: [42, 23], id: 1 } },
+  { kind: "request", note: "no id — a notification, and no response is owed", v: { jsonrpc: "2.0", method: "update", params: [1, 2] } },
+  { kind: "request", note: "the version is a literal, not a number", v: { jsonrpc: "1.0", method: "subtract", id: 1 } },
+  { kind: "request", note: "no method", v: { jsonrpc: "2.0", id: 1 } },
+  { kind: "request", note: "a boolean id — present but malformed, which is not a notification", v: { jsonrpc: "2.0", method: "subtract", id: true } },
+  { kind: "response", note: "a result", v: { jsonrpc: "2.0", id: 1, result: 19 } },
+  { kind: "response", note: "both result and error", v: { jsonrpc: "2.0", id: 1, result: 19, error: { code: -32600, message: "Invalid Request" } } },
+  { kind: "response", note: "neither result nor error", v: { jsonrpc: "2.0", id: 1 } },
+  { kind: "response", note: "an error code that is not an integer", v: { jsonrpc: "2.0", id: 1, error: { code: -1.5, message: "Invalid Request" } } }
+];
+const a5list = document.getElementById("a5list");
+const a5out = document.getElementById("a5out");
+let a5sel = 0;
+MESSAGES.forEach((m, i) => {
+  const b = document.createElement("button");
+  b.textContent = json(m.v);
+  b.onclick = () => { a5sel = i; runA5(); };
+  a5list.appendChild(b);
+});
+document.getElementById("a5explain").textContent = REQUEST.explain();
+function runA5() {
+  [...a5list.children].forEach((b, i) => b.setAttribute("aria-pressed", String(i === a5sel)));
+  const m = MESSAGES[a5sel];
+  const sh = m.kind === "request" ? REQUEST : RESPONSE;
+  const vs = sh.apply(m.v);
+  paintDoc(m.v);
+  mark(vs.map(v => v.at), "flag");
+  const notification = m.kind === "request" && vs.length === 0 && !Object.prototype.hasOwnProperty.call(m.v, "id");
+  a5out.innerHTML =
+    '<div class="result"><div class="line"><span class="label">checked against</span> <span class="val">' +
+      (m.kind === "request" ? "REQUEST" : "RESPONSE") + '</span></div>' +
+    '<div class="line"><span class="label">note</span> <span class="val">' + esc(m.note) + "</span></div></div>" +
+    (vs.length
+      ? '<ul class="violations">' + vs.map(v =>
+          '<li><span class="at">' + esc(v.at || "<root>") + "</span>: " + esc(v.message) + "</li>").join("") + "</ul>"
+      : '<div class="verdict good">Conforms' + (notification ? " — and it is a notification, so no response is owed." : ".") + "</div>");
+}
+
+/* ------------------------------------------------------------------ *
+ * Act navigation
+ * ------------------------------------------------------------------ */
+const ACTS = [
+  { title: "The document", docTitle: "The document" },
+  { title: "Pointer", docTitle: "The document" },
+  { title: "Selector", docTitle: "The document" },
+  { title: "Shape", docTitle: "The document" },
+  { title: "JSON-RPC", docTitle: "The selected message" }
+];
+let act = 0;
+const nav = document.getElementById("nav");
+ACTS.forEach((a, i) => {
+  const b = document.createElement("button");
+  b.innerHTML = '<span class="n">' + (i + 1) + "</span>" + a.title;
+  b.onclick = () => show(i);
+  nav.appendChild(b);
+});
+function show(i) {
+  act = i;
+  [...nav.children].forEach((b, j) => b.setAttribute("aria-current", String(j === i)));
+  document.querySelectorAll(".act").forEach(s => s.classList.toggle("on", +s.dataset.act === i));
+  document.getElementById("docTitle").textContent = ACTS[i].docTitle;
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === ACTS.length - 1;
+  if (i !== 4) paintDoc(currentDoc());
+  mark([], "hit");
+  if (i === 0) a1out.innerHTML = '<span class="empty">Nothing selected yet.</span>';
+  if (i === 1) { if (!a2input.value) a2input.value = A2[0]; runA2(); }
+  if (i === 2) runA3();
+  if (i === 3) runA4();
+  if (i === 4) runA5();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+document.getElementById("prev").onclick = () => show(Math.max(0, act - 1));
+document.getElementById("next").onclick = () => show(Math.min(ACTS.length - 1, act + 1));
+show(0);
+</script>
+</body>
+</html>

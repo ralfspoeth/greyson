@@ -12,6 +12,7 @@ on:
     paths:
       - 'src/main/java/**'
       - 'pom.xml'
+      - 'docs/**'
       - '.github/workflows/javadoc.yml'
   workflow_dispatch:
 
@@ -68,6 +69,18 @@ jobs:
             exit 1
           fi
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+      # Hand-written pages ride along with the generated ones: the Pages
+      # artifact is a single directory, so anything under docs/ has to be
+      # copied into it before the upload or it simply is not published.
+      # Fail loudly rather than deploying a README link that 404s.
+      - name: Add hand-written pages
+        run: |
+          if [ ! -f docs/walkthrough.html ]; then
+            echo "docs/walkthrough.html is missing; the README links to it" >&2
+            exit 1
+          fi
+          cp docs/*.html "${{ steps.apidocs.outputs.dir }}/"
 
       - uses: actions/upload-pages-artifact@v3
         with:
