@@ -6,7 +6,7 @@ A small, opinionated JSON library for Java.
 <dependency>
     <groupId>io.github.ralfspoeth</groupId>
     <artifactId>greyson</artifactId>
-    <version>2.3.2</version>
+    <version>2.3.3</version>
 </dependency>
 ```
 
@@ -642,6 +642,25 @@ use bespoke streaming parsers, intern strings, and skip allocation in
 the hot path. Greyson allocates an algebraic data type for every node.
 If your bottleneck is JSON parsing throughput, use Jackson. If it
 isn't, the simplicity is worth the trade.
+
+---
+
+## What's new in 2.3.3
+
+**Documentation only — no code changed.** Every package now carries a
+`package-info`: the root one is the overview the generated docs open on, and
+`data` and `io` describe their own choices rather than leaving them to be
+found by experiment.
+
+The reason this is a release rather than a push: the javadoc jar on Maven
+Central is built per version and cannot be amended afterwards, so anyone
+reading the API docs in an IDE from the Central artifact — rather than from
+[the website](https://ralfspoeth.github.io/greyson/), which rebuilds on every
+push — would otherwise keep seeing empty package documentation until the next
+release happened to come along.
+
+There is also an [interactive walkthrough](https://ralfspoeth.github.io/greyson/walkthrough.html)
+of the library in five steps, published alongside the API docs.
 
 ---
 
