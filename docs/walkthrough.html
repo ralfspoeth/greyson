@@ -314,6 +314,7 @@ Pointer.parse(<span class="s">"portfolio/positions"</span>)
       <p>The whole specification is one value, and it prints itself back:</p>
       <pre class="java" id="a5explain"></pre>
       <p class="note">Turned around, the same shape becomes a <strong>conformance oracle</strong>: rather than asserting a particular response for a particular request, assert that <em>whatever</em> the processor emits satisfies <code>RESPONSE</code>, down every path. That is the assertion that catches an invalid request producing no response at all — because "nothing" is not a response object.</p>
+      <p class="note">Worth the detour: the same specification written out in <strong>Jackson</strong> and <strong>Gson</strong> as well, with all three cross-checked against each other, is in <a href="https://github.com/ralfspoeth/greyson-competition#a-real-specification-json-rpc-20"><code>greyson-competition</code></a>. It is where the comparison on this page stops being a claim — the convenient accessors in both libraries coerce (<code>asText()</code> turns the number <code>42</code> into <code>"42"</code>), so there the <em>shorter</em> code is the wrong code.</p>
     </section>
 
     <div class="pager">
