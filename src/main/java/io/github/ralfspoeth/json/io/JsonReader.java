@@ -102,7 +102,7 @@ public class JsonReader implements Closeable {
                     if (stack.peek() instanceof Elem.NameElem) {
                         stack.push(Elem.Char.colon);
                     } else {
-                        parseEx("unexpected token: " + tkn);
+                        parseEx("unexpected token: " + tkn.value());
                     }
                 }
                 // a comma separates elements in an aggregate
@@ -112,7 +112,7 @@ public class JsonReader implements Closeable {
                     switch (stack.peek()) {
                         case Elem.ArrBuilderElem abe when !abe.builder.isEmpty() -> stack.push(Elem.Char.comma);
                         case Elem.ObjBuilderElem obe when !obe.builder.isEmpty() -> stack.push(Elem.Char.comma);
-                        case null, default -> parseEx("unexpected token: " + tkn);
+                        case null, default -> parseEx("unexpected token: " + tkn.value());
                     }
                 }
                 // opening braces (as well as opening brackets, see below)
@@ -144,20 +144,20 @@ public class JsonReader implements Closeable {
                             yield builder;
                         }
                         case null, default -> {
-                            parseEx("unexpected token: " + tkn);
+                            parseEx("unexpected token: " + tkn.value());
                             yield null;
                         }
                     };
-                    handle(tkn.value(), obj);
+                    handle(tkn, obj);
                 }
                 // closing a JSON array
                 // the array builder should be on top of the stack
                 case CLOSING_BRACKET -> {
                     if (stack.peek() instanceof Elem.ArrBuilderElem(var builder)) {
                         stack.pop();
-                        handle(tkn.value(), builder);
+                        handle(tkn, builder);
                     } else {
-                        parseEx("unexpected token: " + tkn);
+                        parseEx("unexpected token: " + tkn.value());
                     }
                 }
                 // literal tokens for null, true, false, string;
@@ -176,11 +176,11 @@ public class JsonReader implements Closeable {
                         }
                     } else {
                         var literalToken = token2Value(tkn);
-                        handle(val, Builder.of(literalToken));
+                        handle(tkn, Builder.of(literalToken));
                     }
                 }
                 // number tokens already carry a parsed BigDecimal; no further parsing required
-                case Lexer.NumberToken(var number) -> handle(number.toString(), Builder.of(new JsonNumber(number)));
+                case Lexer.NumberToken(var number) -> handle(tkn, Builder.of(new JsonNumber(number)));
             }
         }
 
@@ -200,7 +200,7 @@ public class JsonReader implements Closeable {
 
     // handle tokens UNLESS these are element names
     // in a JSON object
-    private void handle(String token, Builder<?> v) {
+    private void handle(Lexer.Token token, Builder<?> v) {
         switch (stack.peek()) {
             // stack is empty
             case null -> stack.push(new Elem.Root(v));
@@ -219,7 +219,7 @@ public class JsonReader implements Closeable {
                             // add name-value-pair to the object builder
                             builder.put(name, v);
                         } else {
-                            parseEx("unexpected token: " + token);
+                            parseEx("unexpected token: " + token.value());
                         } // in every other case, something went wrong
                     }
                     // comma on top
@@ -228,13 +228,13 @@ public class JsonReader implements Closeable {
                         if (stack.peek() instanceof Elem.ArrBuilderElem(var builder)) {
                             builder.add(v);
                         } else {
-                            parseEx("unexpected token: " + token);
+                            parseEx("unexpected token: " + token.value());
                         }
                     }
                 }
             }
             case Elem.ArrBuilderElem(var builder) when builder.isEmpty() -> builder.add(v);
-            default -> parseEx("unexpected token: " + token);
+            default -> parseEx("unexpected token: " + token.value());
         }
     }
 
