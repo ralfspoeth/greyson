@@ -6,7 +6,7 @@ A small, opinionated JSON library for Java.
 <dependency>
     <groupId>io.github.ralfspoeth</groupId>
     <artifactId>greyson</artifactId>
-    <version>2.3.3</version>
+    <version>2.3.4</version>
 </dependency>
 ```
 
