@@ -7,7 +7,9 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.util.TreeMap;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class JsonWriterTest {
@@ -30,7 +32,7 @@ class JsonWriterTest {
             wrt.write(orig);
             try(var sr = new StringReader(pw.toString()); var rdr = new JsonReader(sr)) {
                 var result = rdr.read().map(Builder::build).orElseThrow();
-                assertEquals(orig, result);
+                assertEquals(new TreeMap<>(orig.members()), new TreeMap<>(result.members()));
             }
         }
     }
@@ -106,36 +108,76 @@ class JsonWriterTest {
 
     /**
      * The builder overload is a second, parallel implementation of the same
-     * layout -- it had the same three defects -- so it gets its own expected
-     * text rather than being compared against the value overload. Members come
-     * out by name because {@code ObjectBuilder} holds a {@code TreeMap}; that
-     * is the builder's order, not something the writer imposes.
+     * layout -- it had the same three defects -- so it gets its own assertion
+     * rather than being compared against the value overload.
+     *
+     * <p>It used to pin a wider document in name order, which held only
+     * because {@code ObjectBuilder} kept a {@code TreeMap}. It keeps a
+     * {@code HashMap} now, so member order is unspecified on this side too,
+     * and the document below holds one member per object for the same reason
+     * {@link #NESTED} does: nesting and empty aggregates are exercised through
+     * arrays, which are ordered.
      */
     @Test
     void testBuildersAreIndented() throws IOException {
+        try (var rdr = new StringReader(NESTED); var jr = new JsonReader(rdr)) {
+            var builder = jr.read().orElseThrow();
+            var w = new StringWriter();
+            try (var jw = new JsonWriter(w)) {
+                jw.write(builder);
+            }
+            assertEquals(PRETTY, w.toString());
+        }
+    }
+
+    /**
+     * On a document with several members per object, the two overloads can
+     * only be compared as <em>documents</em>, not as text. {@code JsonObject}
+     * runs its members through {@link java.util.Map#copyOf}, whose iteration
+     * order comes from a salt randomised at JVM startup, while the builder
+     * iterates a {@code HashMap}: the two orders differ, and the value side
+     * differs between runs of the same build.
+     *
+     * <p>What must hold regardless is that both write the same document and
+     * that both indent it -- the part the single-member documents above pin
+     * exactly, and that only one of the two parallel implementations could
+     * lose.
+     */
+    @Test
+    void testBothOverloadsWriteTheSameDocument() throws IOException {
         var source = """
                 {"b": 6.0, "a": 5, "n": null, "arr": [1, {"x": 2}], "empty": []}""";
-        var expected = """
-                {
-                    "a": 5,
-                    "arr": [
-                        1,
-                        {
-                            "x": 2
-                        }
-                    ],
-                    "b": 6.0,
-                    "empty": [],
-                    "n": null
-                }""";
+        String fromBuilder;
+        String fromValue;
         try (var rdr = new StringReader(source); var jr = new JsonReader(rdr)) {
             var builder = jr.read().orElseThrow();
             var w = new StringWriter();
             try (var jw = new JsonWriter(w)) {
                 jw.write(builder);
             }
-            assertEquals(expected, w.toString());
+            fromBuilder = w.toString();
+            var w2 = new StringWriter();
+            try (var jw = new JsonWriter(w2)) {
+                jw.write(builder.build());
+            }
+            fromValue = w2.toString();
         }
+        assertAll(
+                () -> assertEquals(reread(fromBuilder), reread(fromValue)),
+                () -> assertEquals(lines(fromBuilder), lines(fromValue),
+                        "one overload indented and the other did not"),
+                () -> assertEquals(12, lines(fromValue), "five members, a nested object and an array")
+        );
+    }
+
+    private static JsonValue reread(String text) throws IOException {
+        try (var rdr = new StringReader(text); var jr = new JsonReader(rdr)) {
+            return jr.read().map(Builder::build).orElseThrow();
+        }
+    }
+
+    private static long lines(String text) {
+        return text.lines().count();
     }
 
     @Test

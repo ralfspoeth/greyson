@@ -32,7 +32,7 @@ class Lexer implements Closeable {
     record NumberToken(BigDecimal number) implements Token {
         @Override
         public String value() {
-            return number.toString();
+            return number.toPlainString();
         }
     }
 
@@ -204,6 +204,76 @@ class Lexer implements Closeable {
     // unicode sequence
     private final UnicodeSequence unicSeq = new UnicodeSequence();
 
+    /**
+     * Hands back one shared {@link String} for repeated string literals
+     * instead of allocating a fresh one each time.
+     *
+     * <p>Documents repeat strings relentlessly, and member names worst of all:
+     * an array of 10,000 records with three members each contains 30,000
+     * occurrences of three distinct names. Enum-like values — {@code "event"},
+     * {@code "USD"}, {@code "OPEN"} — repeat the same way. Allocating a
+     * {@code String} per occurrence was measurably the largest single item in
+     * the lexer's share of parsing.
+     *
+     * <p>Lookup is on the scan buffer's {@code char[]} <em>before</em> any
+     * {@code String} exists, so a hit allocates nothing at all. That is the
+     * whole point: canonicalising after the fact would save retention but not
+     * allocation.
+     *
+     * <p>Three properties keep this from becoming the unbounded static cache
+     * that {@code JsonString.escaped} used to be — a memory leak in server
+     * shape, since values carry attacker-controlled cardinality:
+     * <ul>
+     * <li><b>Per lexer, never static.</b> It dies with the reader, so nothing
+     *     outlives the document it came from.</li>
+     * <li><b>Fixed size, direct-mapped.</b> One slot per hash; a collision
+     *     overwrites. No growth, no eviction policy, no bookkeeping. A stream
+     *     of distinct strings simply keeps replacing slots and costs a hash
+     *     and a failed comparison.</li>
+     * <li><b>Short strings only.</b> Names are short; a long value neither
+     *     enters nor is scanned for.</li>
+     * </ul>
+     *
+     * <p>Sharing instances is safe because {@code String} is immutable, and
+     * invisible because nothing in the API compares them by identity.
+     */
+    static final class StringCache {
+        // power of two: the mask below depends on it
+        private static final int CAPACITY = 128;
+        private static final int MAX_LENGTH = 48;
+
+        private final @Nullable String[] slots = new String[CAPACITY];
+
+        String lookup(char[] buf, int len) {
+            if (len == 0) return "";
+            if (len > MAX_LENGTH) return String.valueOf(buf, 0, len);
+            int hash = 0;
+            for (int i = 0; i < len; i++) {
+                hash = hash * 31 + buf[i];
+            }
+            // spread the high bits, as HashMap does: 31-polynomial hashes of
+            // short ASCII strings vary mostly above the low seven bits
+            int index = (hash ^ (hash >>> 16)) & (CAPACITY - 1);
+            var cached = slots[index];
+            if (cached != null && matches(cached, buf, len)) {
+                return cached;
+            }
+            var fresh = String.valueOf(buf, 0, len);
+            slots[index] = fresh;
+            return fresh;
+        }
+
+        private static boolean matches(String s, char[] buf, int len) {
+            if (s.length() != len) return false;
+            for (int i = 0; i < len; i++) {
+                if (s.charAt(i) != buf[i]) return false;
+            }
+            return true;
+        }
+    }
+
+    private final StringCache strings = new StringCache();
+
 
     boolean hasNext() throws IOException {
         readNextToken();
@@ -332,7 +402,9 @@ class Lexer implements Closeable {
     }
 
     private State stringLiteral() {
-        nextToken = new LiteralToken(Type.STRING, buffer.contentsAndReset());
+        var str = strings.lookup(buffer.array(), buffer.length());
+        nextToken = new LiteralToken(Type.STRING, str);
+        buffer.reset();
         return State.INITIAL;
     }
 
@@ -344,14 +416,37 @@ class Lexer implements Closeable {
         return State.INITIAL;
     }
 
+    /*
+     * The three keyword tokens are constants, so a document full of nulls and
+     * booleans allocates nothing for them: no String, no LiteralToken. The
+     * buffer is compared in place rather than turned into a String to switch
+     * on, which is the same saving the StringCache makes for names, and
+     * exact rather than probabilistic because there are only three answers.
+     */
+    private static final LiteralToken NULL_TOKEN = new LiteralToken(Type.NULL, "null");
+    private static final LiteralToken TRUE_TOKEN = new LiteralToken(Type.TRUE, "true");
+    private static final LiteralToken FALSE_TOKEN = new LiteralToken(Type.FALSE, "false");
+
     private Token constLiteralToken() {
-        var text = buffer.contentsAndReset();
-        return switch (text) {
-            case "null" -> new LiteralToken(Type.NULL, text);
-            case "true" -> new LiteralToken(Type.TRUE, text);
-            case "false" -> new LiteralToken(Type.FALSE, text);
-            default -> throw new JsonParseException("misspelled literal: " + text, row, column);
-        };
+        Token token = null;
+        if (holds("null")) token = NULL_TOKEN;
+        else if (holds("true")) token = TRUE_TOKEN;
+        else if (holds("false")) token = FALSE_TOKEN;
+        if (token == null) {
+            // only now is a String worth building, and the parse is over
+            throw new JsonParseException("misspelled literal: " + buffer.contentsAndReset(), row, column);
+        }
+        buffer.reset();
+        return token;
+    }
+
+    private boolean holds(String keyword) {
+        if (buffer.length() != keyword.length()) return false;
+        var buf = buffer.array();
+        for (int i = 0; i < keyword.length(); i++) {
+            if (buf[i] != keyword.charAt(i)) return false;
+        }
+        return true;
     }
 
     private State appendAndState(char c, Lexer.State s) {

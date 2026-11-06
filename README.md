@@ -630,18 +630,98 @@ otherwise.
 members in a different order than the input. Round-tripping a document preserves
 its *meaning*, not its byte-for-byte layout.
 
-`JsonWriter` does not reorder, so the same applies to its indented output, and
-with one wrinkle: *unspecified* is not merely "different from the input", it is
-free to differ between two runs over the same document, so pretty-printed
-`JsonObject` text is not something to diff or to hash. A `Builder.ObjectBuilder`
-holds a `TreeMap`, so writing the *builder* is by name and stable — the two
-overloads are faithful to their inputs rather than to each other.
+`JsonWriter` does not reorder either, so the same applies to its indented
+output — and with one wrinkle: an immutable map derives its iteration order
+from a salt randomised at JVM startup, so *unspecified* here is not merely
+"different from the input", it is free to differ between two runs of the same
+build. Indented output is for reading, not for diffing, hashing or golden
+files; to compare two documents, parse them back and use `equals`, which is
+order-independent for objects. A `Builder.ObjectBuilder` holds a `TreeMap`,
+so writing the *builder* is by name and stable — the two overloads are
+faithful to their inputs rather than to each other.
+
+### No depth limit
+
+`JsonReader` keeps its partially-built values on an explicit heap stack
+instead of recursing, so nesting depth is bounded by memory rather than by
+the JVM call stack. The JSON Test Suite's `i_structure_500_nested_arrays.json`
+parses rather than overflowing; it is an `i_` case, which the suite leaves to
+the implementation, so this is a position rather than a requirement.
+
+It is the *reader's* guarantee, not the library's. `JsonWriter` recurses per
+level, as do `json()`, `depth()`, `nodes()` and the record-generated
+`toString`/`equals`/`hashCode` — so a deep enough document can be parsed and
+then fail to be printed. No real document comes close.
 
 Greyson is not the fastest JSON library on the JVM. Jackson and Gson
 use bespoke streaming parsers, intern strings, and skip allocation in
 the hot path. Greyson allocates an algebraic data type for every node.
 If your bottleneck is JSON parsing throughput, use Jackson. If it
 isn't, the simplicity is worth the trade.
+
+---
+
+## What's new in 2.3.4
+
+Allocation work in the reader, driven by measurement rather than reading:
+[json-benchmarks](https://github.com/ralfspoeth/json-benchmarks) with JMH's
+`-prof gc`, on a 10,000-record document.
+
+**New: the lexer shares repeated string literals.** Documents repeat strings
+relentlessly, and member names worst of all — 10,000 records with three
+members each contain 30,000 occurrences of three distinct names, and
+enum-like values (`"event"`, `"USD"`) repeat the same way. The lexer now
+looks a literal up on the scan buffer's `char[]` *before* any `String`
+exists, so a repeat allocates nothing at all; canonicalising afterwards
+would have saved retention but not allocation. Measured: **12.69 MB/op to
+11.02 MB/op, −13%**.
+
+The cache is per lexer and dies with the reader, fixed-size and
+direct-mapped, and ignores long strings — deliberately, because an unbounded
+static one is a memory leak in server shape, string values having unbounded
+and often remote-controlled cardinality. That is the same defect removed from
+`JsonString.escaped` in 2.3.2, and it would have been easy to reintroduce
+here.
+
+**`null`, `true` and `false` cost nothing.** They were each building a
+`String` to `switch` on. The buffer is now compared in place and one of three
+constant tokens returned — no `String`, no token object.
+
+**`build()` no longer builds a map to throw it away.** `JsonObject`'s
+canonical constructor applies `Map.copyOf`, which must stay — the constructor
+is public, and that copy is what makes immutability a fact rather than a
+request. But `copyOf` returns its argument unchanged when it is already
+immutable, so handing it `Map.ofEntries` costs one map per object where
+collecting into a `HashMap` cost two.
+
+**Fixed: every number was stringified for an error that never happens.**
+`JsonReader` passed `handle()` a `String` built from the token, and `handle`
+used it in three places, all inside `parseEx`. For numbers that meant a full
+`BigDecimal.toString()` per number in the document, to build a message thrown
+away every time. It now takes the token and converts only when a parse has
+already failed.
+
+**Parse-error text changed at five sites.** They concatenated the token
+*object*, and the fixed tokens are an enum without a `toString` override, so
+`unexpected token: COMMA` now reads `unexpected token: ,`. If you match on
+parse-error text, this is the release that breaks it.
+
+**Documented: the reader has no depth limit**, and that this is the reader's
+guarantee rather than the library's. See
+[No depth limit](#no-depth-limit).
+
+What was tried and rejected: `String.intern()` in place of the cache. It
+cannot avoid the allocation — the `String` must exist before you can intern
+it — and pays a native call on a global locked table for the privilege.
+**43% slower.** It does make member names reference-identical to string
+literals, so map lookups hit on `==` and the mapping phase gained 25%; but
+parsing is 96% of the work, so the trade loses badly.
+
+Not changed, after measuring: the token records and the reader's element
+stack together account for over half the parse time, and no amount of caching
+touches that. Closing it would mean a pull parser and recursive descent — the
+latter at the cost of the depth property above. Greyson is still not the
+fastest JSON library on the JVM, and still is not trying to be.
 
 ---
 

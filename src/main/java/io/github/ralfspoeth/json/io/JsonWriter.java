@@ -19,12 +19,15 @@ import static java.util.Objects.requireNonNull;
  * {@code []}. For the compact single-line form use {@link JsonValue#json()}
  * instead.
  *
- * <p>Members are written in the order the underlying map yields them, which is
- * not reordered here and is not the same thing for the two overloads:
- * {@link Builder.ObjectBuilder} keeps a {@code TreeMap}, so builder output is
- * by name, while {@link JsonObject} holds a {@link java.util.Map#copyOf} map,
- * whose iteration order is unspecified. Do not expect two runs over the same
- * {@code JsonObject} to produce byte-identical text.
+ * <p>Members are written in whatever order the underlying map yields and are
+ * never reordered here, which is not the same thing for the two overloads.
+ * {@link Builder.ObjectBuilder} keeps a {@code TreeMap}, so writing a builder
+ * is by name and stable. {@link JsonObject} holds an immutable map whose
+ * iteration order derives from a salt randomised at JVM startup, so the same
+ * document can come out in a different order on the next run of the same
+ * build — do not diff, hash or golden-file that text. Compare two documents
+ * by parsing them back and using {@code equals}, which is order-independent
+ * for objects.
  */
 public class JsonWriter implements Closeable {
 

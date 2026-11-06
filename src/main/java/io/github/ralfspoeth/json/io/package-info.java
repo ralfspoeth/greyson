@@ -44,14 +44,41 @@
  * method on the value rather than anything in this package.
  *
  * <p>Members are written in the order the underlying map yields them and are
- * not reordered, which is not the same thing for the two overloads.
+ * never reordered here, which is not the same thing for the two overloads.
  * {@link io.github.ralfspoeth.json.data.Builder.ObjectBuilder} keeps a
- * {@code TreeMap}, so writing a builder is by name and stable;
- * {@link io.github.ralfspoeth.json.data.JsonObject} holds a
- * {@link java.util.Map#copyOf} map, whose iteration order is unspecified — and
- * <em>unspecified</em> is not merely "different from the input", it is free to
- * differ between two runs over the same document. So the text of a written
- * {@code JsonObject} is not something to diff or to hash.
+ * {@code TreeMap}, so writing a <em>builder</em> is by name and stable.
+ * {@link io.github.ralfspoeth.json.data.JsonObject} holds an immutable map
+ * whose iteration order derives from a salt randomised at JVM startup, so
+ * <em>unspecified</em> there is not merely "different from the input": the
+ * same document can come out in a different order on the next run of the
+ * same build.
+ *
+ * <p>Indented output is therefore for reading, not for diffing, hashing or
+ * golden-file comparison. To compare two documents, parse them back and use
+ * {@code equals}, which is order-independent for objects.
+ *
+ * <h2>Nesting depth</h2>
+ *
+ * <p><b>The reader imposes no depth limit.</b> {@code JsonReader} holds its
+ * partially-built values on an explicit heap stack rather than recursing, so
+ * nesting is bounded by memory and not by the JVM's call stack — which is why
+ * the JSON Test Suite's {@code i_structure_500_nested_arrays.json} parses
+ * rather than overflowing. That file is an {@code i_} case, which the suite
+ * leaves to the implementation, so accepting it is a deliberate position and
+ * not a conformance requirement.
+ *
+ * <p>Anyone tempted to rewrite that stack as recursive descent — which would
+ * read more clearly, and is how most parsers are written — should know that
+ * this is the property being traded away.
+ *
+ * <p>The guarantee is the <em>reader's</em>, though, not the library's.
+ * {@code JsonWriter} recurses once per level, and so do
+ * {@link io.github.ralfspoeth.json.data.JsonValue#json()},
+ * {@link io.github.ralfspoeth.json.data.JsonValue#depth()},
+ * {@link io.github.ralfspoeth.json.data.JsonValue#nodes()} and the
+ * record-generated {@code toString}, {@code equals} and {@code hashCode}. So
+ * a sufficiently deep document can be parsed and then fail to be written or
+ * printed. At the depths real documents reach, nothing notices.
  *
  * <h2>Resources</h2>
  *

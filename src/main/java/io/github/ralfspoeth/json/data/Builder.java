@@ -5,7 +5,6 @@ import org.jspecify.annotations.Nullable;
 import java.util.*;
 
 import static java.util.Objects.requireNonNull;
-import static java.util.stream.Collectors.toMap;
 
 /**
  * Implements the builder pattern for both aggregate and basic types.
@@ -20,9 +19,10 @@ public sealed interface Builder<T extends JsonValue> {
 
     /**
      * Instantiate a fresh builder from a given {@link JsonValue}.
+     *
      * @param value the value, may not be {@code null}
+     * @param <T>   the actual type of the value
      * @return a new builder instance
-     * @param <T> the actual type of the value
      */
     @SuppressWarnings("unchecked")
     static <T extends JsonValue> Builder<T> of(T value) {
@@ -103,12 +103,13 @@ public sealed interface Builder<T extends JsonValue> {
 
         @Override
         public JsonArray build() {
-            return new JsonArray(data
-                    .stream()
-                    .map(Builder::build)
-                    .map(JsonValue.class::cast)
-                    .toList()
-            );
+            return data.isEmpty() ? new JsonArray(List.of()) :
+                    new JsonArray(data
+                            .stream()
+                            .map(Builder::build)
+                            .map(JsonValue.class::cast)
+                            .toList()
+                    );
         }
 
         private final List<Builder<? extends JsonValue>> data = new ArrayList<>();
@@ -313,12 +314,37 @@ public sealed interface Builder<T extends JsonValue> {
             return this;
         }
 
+        /**
+         * {@inheritDoc}
+         *
+         * <p>Built through {@link Map#ofEntries} rather than collected into a
+         * {@link java.util.HashMap}, because {@link Map#copyOf} — which
+         * {@link JsonObject}'s canonical constructor applies, and must keep
+         * applying, since that constructor is public — returns its argument
+         * unchanged when it is already immutable. Handing it a {@code HashMap}
+         * instead means building a whole map that exists only to be copied and
+         * discarded: a table plus a node per member, per object.
+         *
+         * <p>{@code ofEntries} rejects duplicate keys where {@code copyOf} of a
+         * {@code HashMap} silently keeps the last. That is safe only because
+         * {@code data} is a {@code Map} and cannot hold duplicates in the first
+         * place — worth remembering if this ever stops being one, since
+         * RFC 8259 duplicate names must still collapse rather than throw.
+         */
         @Override
         public JsonObject build() {
-            return new JsonObject(data.entrySet()
-                    .stream()
-                    .collect(toMap(Map.Entry::getKey, e -> e.getValue().build()))
-            );
+            if (data.isEmpty()) {
+                return new JsonObject(Map.of());
+            }
+            @SuppressWarnings("unchecked")
+            Map.Entry<String, JsonValue>[] entries = new Map.Entry[data.size()];
+            int i = 0;
+            // a plain loop rather than a stream: this runs once per object in
+            // a document, and a pipeline per object is not free either
+            for (var e : data.entrySet()) {
+                entries[i++] = Map.entry(e.getKey(), e.getValue().build());
+            }
+            return new JsonObject(Map.ofEntries(entries));
         }
 
         @Override
