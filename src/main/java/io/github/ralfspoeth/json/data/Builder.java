@@ -26,11 +26,7 @@ public sealed interface Builder<T extends JsonValue> {
      */
     @SuppressWarnings("unchecked")
     static <T extends JsonValue> Builder<T> of(T value) {
-        return (Builder<T>) switch (value) {
-            case JsonObject jo -> objectBuilder(jo);
-            case JsonArray ja -> arrayBuilder(ja);
-            case Basic<?> b -> basicBuilder(b);
-        };
+        return (Builder<T>) Builders.toBuilder(requireNonNull(value));
     }
 
     /**
@@ -55,7 +51,9 @@ public sealed interface Builder<T extends JsonValue> {
      * Same as {@code objectBuilder(jo.members())}
      */
     static ObjectBuilder objectBuilder(JsonObject jo) {
-        return objectBuilder().insert(jo);
+        // via Builders so that nesting depth is bounded by memory rather than
+        // by the call stack; insert(jo) would recurse through put/objectBuilder
+        return (ObjectBuilder) Builders.toBuilder(requireNonNull(jo));
     }
 
     /**
@@ -73,7 +71,8 @@ public sealed interface Builder<T extends JsonValue> {
      * @param ja a {@code JsonArray}, may not be {@code null}
      */
     static ArrayBuilder arrayBuilder(JsonArray ja) {
-        return arrayBuilder().addAll(ja.elements());
+        // see objectBuilder(JsonObject): addAll would recurse through add
+        return (ArrayBuilder) Builders.toBuilder(requireNonNull(ja));
     }
 
     /**
@@ -103,13 +102,7 @@ public sealed interface Builder<T extends JsonValue> {
 
         @Override
         public JsonArray build() {
-            return data.isEmpty() ? new JsonArray(List.of()) :
-                    new JsonArray(data
-                            .stream()
-                            .map(Builder::build)
-                            .map(JsonValue.class::cast)
-                            .toList()
-                    );
+            return data.isEmpty() ? new JsonArray(List.of()) : (JsonArray) Builders.build(this);
         }
 
         private final List<Builder<? extends JsonValue>> data = new ArrayList<>();
@@ -333,18 +326,11 @@ public sealed interface Builder<T extends JsonValue> {
          */
         @Override
         public JsonObject build() {
-            if (data.isEmpty()) {
-                return new JsonObject(Map.of());
-            }
-            @SuppressWarnings("unchecked")
-            Map.Entry<String, JsonValue>[] entries = new Map.Entry[data.size()];
-            int i = 0;
-            // a plain loop rather than a stream: this runs once per object in
-            // a document, and a pipeline per object is not free either
-            for (var e : data.entrySet()) {
-                entries[i++] = Map.entry(e.getKey(), e.getValue().build());
-            }
-            return new JsonObject(Map.ofEntries(entries));
+            // Builders walks the tree on an explicit stack: e.getValue().build()
+            // would recurse, which is what made Greyson.readValue -- a parse
+            // followed by build() -- bounded by the call stack even though the
+            // parse itself is not
+            return data.isEmpty() ? new JsonObject(Map.of()) : (JsonObject) Builders.build(this);
         }
 
         @Override

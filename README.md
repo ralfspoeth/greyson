@@ -648,16 +648,82 @@ the JVM call stack. The JSON Test Suite's `i_structure_500_nested_arrays.json`
 parses rather than overflowing; it is an `i_` case, which the suite leaves to
 the implementation, so this is a position rather than a requirement.
 
-It is the *reader's* guarantee, not the library's. `JsonWriter` recurses per
-level, as do `json()`, `depth()`, `nodes()` and the record-generated
-`toString`/`equals`/`hashCode` — so a deep enough document can be parsed and
-then fail to be printed. No real document comes close.
+Since 2.5.0 the same holds for `build()` and `JsonValue.builder()`, so
+*reading* a document is unbounded whichever entry point you use. It is still
+not the library's guarantee: `JsonWriter` recurses per level, as do `json()`,
+`depth()`, `nodes()` and the record-generated `toString`/`equals`/`hashCode`
+— so a deep enough document can be parsed and then fail to be printed or
+compared. No real document comes close.
 
-Greyson is not the fastest JSON library on the JVM. Jackson and Gson
-use bespoke streaming parsers, intern strings, and skip allocation in
-the hot path. Greyson allocates an algebraic data type for every node.
-If your bottleneck is JSON parsing throughput, use Jackson. If it
-isn't, the simplicity is worth the trade.
+### Speed
+
+Greyson is not the fastest JSON library on the JVM, and is not trying to be.
+It is, since 2.5.0, close enough that the difference is unlikely to be your
+problem. Parsing a 568 kB document into an immutable tree, against the same
+work in Jackson and Gson, measured with JMH at three forks and
+`-prof gc`:
+
+| | time | allocated |
+| --- | --- | --- |
+| Jackson → records | 1.25 ms | 2.08 MB |
+| Gson → records | 1.41 ms | 3.15 MB |
+| **Greyson → `JsonValue`** | **1.62 ms** | **3.83 MB** |
+
+What remains is the data model rather than the parser. Jackson binds
+straight into a record of `int` and `String` fields; Greyson allocates a
+`JsonString`, `JsonNumber` or `JsonBoolean` per scalar and an immutable map
+per object, because that tree is the thing you then query, pattern-match and
+hand around safely. If JSON throughput really is your bottleneck, use
+Jackson. Otherwise the remaining ~30% buys an algebraic data type.
+
+The numbers come from
+[json-benchmarks](https://github.com/ralfspoeth/json-benchmarks), which is
+public and runnable; the comparison on correctness rather than speed lives in
+[greyson-competition](https://github.com/ralfspoeth/greyson-competition).
+
+---
+
+## What's new in 2.5.0
+
+The reader was rewritten. Parsing a 568 kB document into a tree went from
+**4.76 ms and 12.7 MB to 1.62 ms and 3.83 MB** — 2.9× faster on a third of
+the allocation, and from 3.6× Jackson's time to 1.29×. Measured throughout
+with JMH at three forks and `-prof gc`, because on this hardware timings
+alone drift ~5% between runs while allocation figures are exact.
+
+**There is no tokenizer any more.** `Lexer` is gone, and with it a `Token`
+record per token and a stack-element object per structural step —
+measurement put that pipeline at over half the cost of a parse. A token is
+control flow now; characters arrive in blocks rather than one
+`Reader.read()` call each; and partially-built aggregates are marks into one
+flat stack instead of objects. `Lexer` was package-private, so none of this
+is visible from outside.
+
+**Reading produces values.** The parser builds `JsonValue`s directly, so
+`Greyson.readValue` no longer parses into builders and walks the result a
+second time to convert it. `JsonReader` gains `readValue()` and
+`readBuilder()`; `read()` is deprecated for removal, because the name never
+said what came back. The conversion cost moved onto `readBuilder`, which is
+the rarer call — if yours is the builder-heavy workload, that path is now
+the slower one.
+
+**Nesting depth is bounded by memory on every read path.** The parser always
+kept its stack on the heap, but `Greyson.readValue` was a parse followed by
+`build()` — and `build()` recursed, as did `JsonValue.builder()`. The
+guarantee stopped at the parse. Both are iterative now. The JSON Test
+Suite's `i_structure_500_nested_arrays.json` never tested this, since 500
+frames is nothing; a new test uses 50,000, which fails outright on a
+recursive implementation instead of passing by luck.
+
+**Smaller things.** The read buffer starts at 1 kB and grows to 8 kB only
+once a read fills it, so a JSON-RPC message or a config file stops paying
+16 kB per parse. `ObjectBuilder.build()` goes through `Map.ofEntries`, which
+`Map.copyOf` passes through unchanged, instead of collecting into a
+`HashMap` for `copyOf` to copy and discard.
+
+**Parse-error messages changed again**, as they did in 2.3.4. If you match
+on them in tests, this release will break that. The positions and the
+exception type are unchanged.
 
 ---
 

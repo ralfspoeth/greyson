@@ -31,7 +31,7 @@ class JsonWriterTest {
         try (var pw = new StringWriter(); var wrt = new JsonWriter(new PrintWriter(pw))) {
             wrt.write(orig);
             try(var sr = new StringReader(pw.toString()); var rdr = new JsonReader(sr)) {
-                var result = rdr.read().map(Builder::build).orElseThrow();
+                var result = rdr.readValue().orElseThrow();
                 assertEquals(new TreeMap<>(orig.members()), new TreeMap<>(result.members()));
             }
         }
@@ -97,7 +97,7 @@ class JsonWriterTest {
     @Test
     void testAggregatesAreIndented() throws IOException {
         try (var rdr = new StringReader(NESTED); var jr = new JsonReader(rdr)) {
-            var value = jr.read().map(Builder::build).orElseThrow();
+            var value = jr.readValue().orElseThrow();
             var w = new StringWriter();
             try (var jw = new JsonWriter(w)) {
                 jw.write(value);
@@ -121,7 +121,7 @@ class JsonWriterTest {
     @Test
     void testBuildersAreIndented() throws IOException {
         try (var rdr = new StringReader(NESTED); var jr = new JsonReader(rdr)) {
-            var builder = jr.read().orElseThrow();
+            var builder = jr.readBuilder().orElseThrow();
             var w = new StringWriter();
             try (var jw = new JsonWriter(w)) {
                 jw.write(builder);
@@ -150,7 +150,7 @@ class JsonWriterTest {
         String fromBuilder;
         String fromValue;
         try (var rdr = new StringReader(source); var jr = new JsonReader(rdr)) {
-            var builder = jr.read().orElseThrow();
+            var builder = jr.readBuilder().orElseThrow();
             var w = new StringWriter();
             try (var jw = new JsonWriter(w)) {
                 jw.write(builder);
@@ -172,7 +172,7 @@ class JsonWriterTest {
 
     private static JsonValue reread(String text) throws IOException {
         try (var rdr = new StringReader(text); var jr = new JsonReader(rdr)) {
-            return jr.read().map(Builder::build).orElseThrow();
+            return jr.readValue().orElseThrow();
         }
     }
 
