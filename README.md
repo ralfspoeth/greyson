@@ -6,7 +6,7 @@ A small, opinionated JSON library for Java.
 <dependency>
     <groupId>io.github.ralfspoeth</groupId>
     <artifactId>greyson</artifactId>
-    <version>2.3.4</version>
+    <version>2.4.0</version>
 </dependency>
 ```
 
@@ -418,21 +418,21 @@ and then in its value — or you are not, in which case you don't mention it.
 `optional` is for the third case, where absence is acceptable but a value that
 *is* there still has to fit:
 
-| |                                          |
-| --- |------------------------------------------|
-| `member("ccy", string())` | `ccy` is there, and it is a string       |
-| `member("ccy")` | `ccy` is there, whatever it holds        |
-| `optional("ccy", string())` | *if* `ccy` is there, it is a string      |
-| `exactlyOne(Map.of("result", r, "error", e))` | exactly one of these members, satisfying its shape |
-| `exact(Basic.of("2.0"))` | the value equals `"2.0"` — for discriminators |
-| `oneOf("USD", "EUR", "GBP")` | the value is one of these |
-| `matching("[A-Z]{3}")` | the value is a string matching the regex in full |
-| `satisfying("a whole number", p)` | the value passes an arbitrary predicate |
-| `each(number())` | an array who's every element is a number |
-| `size(2)` / `size(1, 5)` / `atLeast(1)` | cardinality of an array or object        |
-| `parse("a/b").must(string())` | `a/b` resolves, and holds a string       |
-| `a.or(b)` | either holds — for union-typed fields |
-| `anything()` / `nothing()` | accept everything / nothing; identities of `and` / `or` |
+|                                               |                                                         |
+|-----------------------------------------------|---------------------------------------------------------|
+| `member("ccy", string())`                     | `ccy` is there, and it is a string                      |
+| `member("ccy")`                               | `ccy` is there, whatever it holds                       |
+| `optional("ccy", string())`                   | *if* `ccy` is there, it is a string                     |
+| `exactlyOne(Map.of("result", r, "error", e))` | exactly one of these members, satisfying its shape      |
+| `exact(Basic.of("2.0"))`                      | the value equals `"2.0"` — for discriminators           |
+| `oneOf("USD", "EUR", "GBP")`                  | the value is one of these                               |
+| `matching("[A-Z]{3}")`                        | the value is a string matching the regex in full        |
+| `satisfying("a whole number", p)`             | the value passes an arbitrary predicate                 |
+| `each(number())`                              | an array who's every element is a number                |
+| `size(2)` / `size(1, 5)` / `atLeast(1)`       | cardinality of an array or object                       |
+| `parse("a/b").must(string())`                 | `a/b` resolves, and holds a string                      |
+| `a.or(b)`                                     | either holds — for union-typed fields                   |
+| `anything()` / `nothing()`                    | accept everything / nothing; identities of `and` / `or` |
 
 A shape is an immutable value object — comparable, usable as a map key, and
 printable via `explain()`. The implementing types are package-private, so
@@ -576,22 +576,13 @@ It exports four packages:
 - `io.github.ralfspoeth.json.io` — `JsonReader`, `JsonWriter`, `JsonParseException`
 - `io.github.ralfspoeth.json.query` — `Pointer`, `Selector`, `Shape`, `Queries`
 
-### Why ship a descriptor at all
+Everything else is internal and unexported, which is the practical reason the
+descriptor is here: it marks the boundary. `Shape`'s implementations are
+package-private for the same reason, and the reader was replaced wholesale in
+2.4.0 without affecting the exported surface.
 
-Being a kind citizen, mostly. Writing a `module-info.java` costs the author
-something — the test path gets awkward, split packages are out, reflection needs
-`opens` — and almost all of the benefit lands on whoever consumes the library.
-
-Without one, a modular consumer has to take the jar as an automatic module, named
-by guessing from the filename, and cannot `jlink` a runtime image that includes
-it. The library becomes the reason somebody else can't be strict. With one, they
-get a stable name, a dependency graph the compiler checks before anything runs,
-and services declared rather than configured.
-
-It is also the only way to say which packages are *not* API. Greyson's internals
-stay unexported and `Shape`'s implementations are package-private, so both remain
-free to change. That part is a kindness to the author too — but it's the
-enforcement that makes the promise worth anything.
+On why a library should ship a descriptor at all, I've written that up
+[separately](https://github.com/ralfspoeth).
 
 ---
 
@@ -648,7 +639,7 @@ the JVM call stack. The JSON Test Suite's `i_structure_500_nested_arrays.json`
 parses rather than overflowing; it is an `i_` case, which the suite leaves to
 the implementation, so this is a position rather than a requirement.
 
-Since 2.5.0 the same holds for `build()` and `JsonValue.builder()`, so
+Since 2.4.0 the same holds for `build()` and `JsonValue.builder()`, so
 *reading* a document is unbounded whichever entry point you use. It is still
 not the library's guarantee: `JsonWriter` recurses per level, as do `json()`,
 `depth()`, `nodes()` and the record-generated `toString`/`equals`/`hashCode`
@@ -658,7 +649,7 @@ compared. No real document comes close.
 ### Speed
 
 Greyson is not the fastest JSON library on the JVM, and is not trying to be.
-It is, since 2.5.0, close enough that the difference is unlikely to be your
+It is, since 2.4.0, close enough that the difference is unlikely to be your
 problem. Parsing a 568 kB document into an immutable tree, against the same
 work in Jackson and Gson, measured with JMH at three forks and
 `-prof gc`:
@@ -683,7 +674,7 @@ public and runnable; the comparison on correctness rather than speed lives in
 
 ---
 
-## What's new in 2.5.0
+## What's new in 2.4.0
 
 The reader was rewritten. Parsing a 568 kB document into a tree went from
 **4.76 ms and 12.7 MB to 1.62 ms and 3.83 MB** — 2.9× faster on a third of

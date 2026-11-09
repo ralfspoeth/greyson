@@ -158,7 +158,7 @@ public class JsonReader implements Closeable {
      * {@link #readBuilder()}, or {@link #readValue()} if a value is what you
      * wanted, which it usually is.
      */
-    @Deprecated(since = "2.5", forRemoval = true)
+    @Deprecated(since = "2.4", forRemoval = true)
     public Optional<Builder<? extends JsonValue>> read() throws IOException {
         return readBuilder();
     }
