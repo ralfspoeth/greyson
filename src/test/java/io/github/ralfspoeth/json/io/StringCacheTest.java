@@ -1,10 +1,14 @@
 package io.github.ralfspoeth.json.io;
 
+import io.github.ralfspoeth.json.data.JsonArray;
+import io.github.ralfspoeth.json.data.JsonObject;
+import io.github.ralfspoeth.json.data.JsonString;
+import io.github.ralfspoeth.json.data.JsonValue;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-import java.io.StringReader;
+import java.io.Reader;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,44 +20,53 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The lexer's {@link Lexer.StringCache} hands back one shared {@code String}
- * for a repeated literal. Content is unaffected — {@code String} is immutable
- * and nothing compares instances — so the only way to test it is by identity,
- * and the only way to test the bounds is to exceed them.
+ * {@link JsonReader.StringCache} hands back one shared {@code String} for a
+ * repeated literal. Content is unaffected — {@code String} is immutable and
+ * nothing compares instances — so the only way to test it is by identity, and
+ * the only way to test its bounds is to exceed them.
  *
  * <p>The bounds are the point. An unbounded version of this cache is the
- * memory leak that was removed from {@code JsonString.escaped}: string
+ * memory leak removed from {@code JsonString.escaped} in 2.3.2: string
  * <em>values</em> carry unbounded, often remote-controlled cardinality, so a
- * cache that grows without limit and outlives its document is a server-shaped
- * defect. These tests pin that it does neither.
+ * cache that grows without limit and outlives its document is a
+ * server-shaped defect. These tests pin that it does neither.
  */
 class StringCacheTest {
 
-    private static List<String> lex(String source) throws IOException {
+    /** Every string literal the reader produced, in document order. */
+    private static List<String> strings(String source) throws IOException {
         var out = new ArrayList<String>();
-        try (var lexer = new Lexer(new StringReader(source))) {
-            while (lexer.hasNext()) {
-                if (lexer.next() instanceof Lexer.LiteralToken(var type, var value)
-                        && type == Lexer.Type.STRING) {
-                    out.add(value);
-                }
-            }
+        try (var rdr = new JsonReader(Reader.of(source))) {
+            collect(rdr.readValue().orElseThrow(), out);
         }
         return out;
+    }
+
+    private static void collect(JsonValue v, List<String> out) {
+        switch (v) {
+            case JsonObject(var members) -> members.forEach((k, m) -> {
+                out.add(k);
+                collect(m, out);
+            });
+            case JsonArray(var elements) -> elements.forEach(e -> collect(e, out));
+            case JsonString(var s) -> out.add(s);
+            default -> { }
+        }
     }
 
     @Test
     @DisplayName("A repeated literal yields the very same instance")
     void repeatsAreShared() throws IOException {
-        var strings = lex("""
+        // one member per object, so map iteration order cannot shuffle this
+        var s = strings("""
                 [{"ccy": "USD"}, {"ccy": "EUR"}, {"ccy": "USD"}]""");
         assertAll(
-                () -> assertEquals(List.of("ccy", "USD", "ccy", "EUR", "ccy", "USD"), strings),
+                () -> assertEquals(List.of("ccy", "USD", "ccy", "EUR", "ccy", "USD"), s),
                 // the member name, three occurrences
-                () -> assertSame(strings.get(0), strings.get(2)),
-                () -> assertSame(strings.get(0), strings.get(4)),
+                () -> assertSame(s.get(0), s.get(2)),
+                () -> assertSame(s.get(0), s.get(4)),
                 // and a repeated value, which is where enum-like data pays off
-                () -> assertSame(strings.get(1), strings.get(5))
+                () -> assertSame(s.get(1), s.get(5))
         );
     }
 
@@ -61,32 +74,32 @@ class StringCacheTest {
     @DisplayName("Content is untouched, including escapes")
     void contentIsUnchanged() throws IOException {
         assertEquals(
-                List.of("a\"b", "c\\d", "e\tf", "äöü", "", "tab\there"),
-                lex("""
-                        ["a\\"b", "c\\\\d", "e\\tf", "\\u00e4\\u00f6\\u00fc", "", "tab\\there"]"""));
+                List.of("a\"b", "c\\d", "e\tf", "äöü", "", "tab\there", "sl/ash"),
+                strings("""
+                        ["a\\"b", "c\\\\d", "e\\tf", "\\u00e4\\u00f6\\u00fc", "", \
+                        "tab\\there", "sl\\/ash"]"""));
     }
 
     /**
-     * Long strings bypass the cache entirely — they are neither stored nor
-     * scanned for — so a document of large distinct values cannot fill it.
+     * Long strings bypass the cache entirely — neither stored nor scanned for
+     * — so a document of large distinct values cannot fill it.
      */
     @Test
-    @DisplayName("Strings beyond the length bound are not cached")
+    @DisplayName("Strings beyond the length bound are not retained")
     void longStringsBypass() throws IOException {
         var long1 = "x".repeat(200);
-        var strings = lex("[\"" + long1 + "\", \"" + long1 + "\"]");
+        var s = strings("[\"" + long1 + "\", \"" + long1 + "\"]");
         assertAll(
-                () -> assertEquals(long1, strings.get(0)),
-                () -> assertEquals(long1, strings.get(1)),
-                () -> assertNotSame(strings.get(0), strings.get(1), "a long string should not be retained")
+                () -> assertEquals(long1, s.get(0)),
+                () -> assertEquals(long1, s.get(1)),
+                () -> assertNotSame(s.get(0), s.get(1))
         );
     }
 
     /**
      * Direct-mapped and fixed-size: a flood of distinct strings overwrites
      * slots rather than growing. Correctness must not depend on a hit, so the
-     * values still have to come back right — and a name seen before the flood
-     * may or may not survive it, which is fine and deliberately not asserted.
+     * values still have to come back right.
      */
     @Test
     @DisplayName("A flood of distinct strings stays correct")
@@ -98,20 +111,19 @@ class StringCacheTest {
             expected.add(s);
             json.append(i == 0 ? "" : ", ").append('"').append(s).append('"');
         }
-        json.append(']');
-        assertEquals(expected, lex(json.toString()));
+        assertEquals(expected, strings(json.append(']').toString()));
     }
 
     /**
-     * The cache belongs to one lexer, so nothing survives the document. This
-     * is the property whose absence made the old escape cache a leak.
+     * The cache belongs to one reader, so nothing survives the document —
+     * the property whose absence made the old escape cache a leak.
      */
     @Test
-    @DisplayName("Nothing is shared between two lexers")
-    void cacheIsPerLexer() throws IOException {
-        var first = lex("""
+    @DisplayName("Nothing is shared between two readers")
+    void cacheIsPerReader() throws IOException {
+        var first = strings("""
                 ["ccy"]""");
-        var second = lex("""
+        var second = strings("""
                 ["ccy"]""");
         assertAll(
                 () -> assertEquals(first, second),
@@ -120,33 +132,10 @@ class StringCacheTest {
         );
     }
 
-    /**
-     * {@code null}, {@code true} and {@code false} are constants, so they cost
-     * neither a {@code String} nor a token.
-     */
-    @Test
-    @DisplayName("Keyword tokens are shared constants")
-    void keywordsAreConstants() throws IOException {
-        var tokens = new ArrayList<Lexer.Token>();
-        try (var lexer = new Lexer(new StringReader("[null, true, false, null, true, false]"))) {
-            while (lexer.hasNext()) {
-                var t = lexer.next();
-                if (t instanceof Lexer.LiteralToken) tokens.add(t);
-            }
-        }
-        assertAll(
-                () -> assertEquals(6, tokens.size()),
-                () -> assertSame(tokens.get(0), tokens.get(3)),
-                () -> assertSame(tokens.get(1), tokens.get(4)),
-                () -> assertSame(tokens.get(2), tokens.get(5)),
-                () -> assertEquals("null", tokens.getFirst().value())
-        );
-    }
-
     @Test
     @DisplayName("A misspelled keyword still reports its text")
     void misspelledKeywordStillReports() {
-        var ex = assertThrows(JsonParseException.class, () -> lex("[nul]"));
-        assertTrue(ex.getMessage().contains("nul"), ex.getMessage());
+        var ex = assertThrows(JsonParseException.class, () -> strings("[nul]"));
+        assertTrue(ex.getMessage().contains("null"), ex.getMessage());
     }
 }

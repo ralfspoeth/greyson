@@ -6,7 +6,7 @@ A small, opinionated JSON library for Java.
 <dependency>
     <groupId>io.github.ralfspoeth</groupId>
     <artifactId>greyson</artifactId>
-    <version>2.3.4</version>
+    <version>2.4.0</version>
 </dependency>
 ```
 
@@ -418,21 +418,21 @@ and then in its value — or you are not, in which case you don't mention it.
 `optional` is for the third case, where absence is acceptable but a value that
 *is* there still has to fit:
 
-| |                                          |
-| --- |------------------------------------------|
-| `member("ccy", string())` | `ccy` is there, and it is a string       |
-| `member("ccy")` | `ccy` is there, whatever it holds        |
-| `optional("ccy", string())` | *if* `ccy` is there, it is a string      |
-| `exactlyOne(Map.of("result", r, "error", e))` | exactly one of these members, satisfying its shape |
-| `exact(Basic.of("2.0"))` | the value equals `"2.0"` — for discriminators |
-| `oneOf("USD", "EUR", "GBP")` | the value is one of these |
-| `matching("[A-Z]{3}")` | the value is a string matching the regex in full |
-| `satisfying("a whole number", p)` | the value passes an arbitrary predicate |
-| `each(number())` | an array who's every element is a number |
-| `size(2)` / `size(1, 5)` / `atLeast(1)` | cardinality of an array or object        |
-| `parse("a/b").must(string())` | `a/b` resolves, and holds a string       |
-| `a.or(b)` | either holds — for union-typed fields |
-| `anything()` / `nothing()` | accept everything / nothing; identities of `and` / `or` |
+|                                               |                                                         |
+|-----------------------------------------------|---------------------------------------------------------|
+| `member("ccy", string())`                     | `ccy` is there, and it is a string                      |
+| `member("ccy")`                               | `ccy` is there, whatever it holds                       |
+| `optional("ccy", string())`                   | *if* `ccy` is there, it is a string                     |
+| `exactlyOne(Map.of("result", r, "error", e))` | exactly one of these members, satisfying its shape      |
+| `exact(Basic.of("2.0"))`                      | the value equals `"2.0"` — for discriminators           |
+| `oneOf("USD", "EUR", "GBP")`                  | the value is one of these                               |
+| `matching("[A-Z]{3}")`                        | the value is a string matching the regex in full        |
+| `satisfying("a whole number", p)`             | the value passes an arbitrary predicate                 |
+| `each(number())`                              | an array who's every element is a number                |
+| `size(2)` / `size(1, 5)` / `atLeast(1)`       | cardinality of an array or object                       |
+| `parse("a/b").must(string())`                 | `a/b` resolves, and holds a string                      |
+| `a.or(b)`                                     | either holds — for union-typed fields                   |
+| `anything()` / `nothing()`                    | accept everything / nothing; identities of `and` / `or` |
 
 A shape is an immutable value object — comparable, usable as a map key, and
 printable via `explain()`. The implementing types are package-private, so
@@ -576,22 +576,13 @@ It exports four packages:
 - `io.github.ralfspoeth.json.io` — `JsonReader`, `JsonWriter`, `JsonParseException`
 - `io.github.ralfspoeth.json.query` — `Pointer`, `Selector`, `Shape`, `Queries`
 
-### Why ship a descriptor at all
+Everything else is internal and unexported, which is the practical reason the
+descriptor is here: it marks the boundary. `Shape`'s implementations are
+package-private for the same reason, and the reader was replaced wholesale in
+2.4.0 without affecting the exported surface.
 
-Being a kind citizen, mostly. Writing a `module-info.java` costs the author
-something — the test path gets awkward, split packages are out, reflection needs
-`opens` — and almost all of the benefit lands on whoever consumes the library.
-
-Without one, a modular consumer has to take the jar as an automatic module, named
-by guessing from the filename, and cannot `jlink` a runtime image that includes
-it. The library becomes the reason somebody else can't be strict. With one, they
-get a stable name, a dependency graph the compiler checks before anything runs,
-and services declared rather than configured.
-
-It is also the only way to say which packages are *not* API. Greyson's internals
-stay unexported and `Shape`'s implementations are package-private, so both remain
-free to change. That part is a kindness to the author too — but it's the
-enforcement that makes the promise worth anything.
+On why a library should ship a descriptor at all, I've written that up
+[separately](https://github.com/ralfspoeth).
 
 ---
 
@@ -648,16 +639,82 @@ the JVM call stack. The JSON Test Suite's `i_structure_500_nested_arrays.json`
 parses rather than overflowing; it is an `i_` case, which the suite leaves to
 the implementation, so this is a position rather than a requirement.
 
-It is the *reader's* guarantee, not the library's. `JsonWriter` recurses per
-level, as do `json()`, `depth()`, `nodes()` and the record-generated
-`toString`/`equals`/`hashCode` — so a deep enough document can be parsed and
-then fail to be printed. No real document comes close.
+Since 2.4.0 the same holds for `build()` and `JsonValue.builder()`, so
+*reading* a document is unbounded whichever entry point you use. It is still
+not the library's guarantee: `JsonWriter` recurses per level, as do `json()`,
+`depth()`, `nodes()` and the record-generated `toString`/`equals`/`hashCode`
+— so a deep enough document can be parsed and then fail to be printed or
+compared. No real document comes close.
 
-Greyson is not the fastest JSON library on the JVM. Jackson and Gson
-use bespoke streaming parsers, intern strings, and skip allocation in
-the hot path. Greyson allocates an algebraic data type for every node.
-If your bottleneck is JSON parsing throughput, use Jackson. If it
-isn't, the simplicity is worth the trade.
+### Speed
+
+Greyson is not the fastest JSON library on the JVM, and is not trying to be.
+It is, since 2.4.0, close enough that the difference is unlikely to be your
+problem. Parsing a 568 kB document into an immutable tree, against the same
+work in Jackson and Gson, measured with JMH at three forks and
+`-prof gc`:
+
+| | time | allocated |
+| --- | --- | --- |
+| Jackson → records | 1.25 ms | 2.08 MB |
+| Gson → records | 1.41 ms | 3.15 MB |
+| **Greyson → `JsonValue`** | **1.62 ms** | **3.83 MB** |
+
+What remains is the data model rather than the parser. Jackson binds
+straight into a record of `int` and `String` fields; Greyson allocates a
+`JsonString`, `JsonNumber` or `JsonBoolean` per scalar and an immutable map
+per object, because that tree is the thing you then query, pattern-match and
+hand around safely. If JSON throughput really is your bottleneck, use
+Jackson. Otherwise the remaining ~30% buys an algebraic data type.
+
+The numbers come from
+[json-benchmarks](https://github.com/ralfspoeth/json-benchmarks), which is
+public and runnable; the comparison on correctness rather than speed lives in
+[greyson-competition](https://github.com/ralfspoeth/greyson-competition).
+
+---
+
+## What's new in 2.4.0
+
+The reader was rewritten. Parsing a 568 kB document into a tree went from
+**4.76 ms and 12.7 MB to 1.62 ms and 3.83 MB** — 2.9× faster on a third of
+the allocation, and from 3.6× Jackson's time to 1.29×. Measured throughout
+with JMH at three forks and `-prof gc`, because on this hardware timings
+alone drift ~5% between runs while allocation figures are exact.
+
+**There is no tokenizer any more.** `Lexer` is gone, and with it a `Token`
+record per token and a stack-element object per structural step —
+measurement put that pipeline at over half the cost of a parse. A token is
+control flow now; characters arrive in blocks rather than one
+`Reader.read()` call each; and partially-built aggregates are marks into one
+flat stack instead of objects. `Lexer` was package-private, so none of this
+is visible from outside.
+
+**Reading produces values.** The parser builds `JsonValue`s directly, so
+`Greyson.readValue` no longer parses into builders and walks the result a
+second time to convert it. `JsonReader` gains `readValue()` and
+`readBuilder()`; `read()` is deprecated for removal, because the name never
+said what came back. The conversion cost moved onto `readBuilder`, which is
+the rarer call — if yours is the builder-heavy workload, that path is now
+the slower one.
+
+**Nesting depth is bounded by memory on every read path.** The parser always
+kept its stack on the heap, but `Greyson.readValue` was a parse followed by
+`build()` — and `build()` recursed, as did `JsonValue.builder()`. The
+guarantee stopped at the parse. Both are iterative now. The JSON Test
+Suite's `i_structure_500_nested_arrays.json` never tested this, since 500
+frames is nothing; a new test uses 50,000, which fails outright on a
+recursive implementation instead of passing by luck.
+
+**Smaller things.** The read buffer starts at 1 kB and grows to 8 kB only
+once a read fills it, so a JSON-RPC message or a config file stops paying
+16 kB per parse. `ObjectBuilder.build()` goes through `Map.ofEntries`, which
+`Map.copyOf` passes through unchanged, instead of collecting into a
+`HashMap` for `copyOf` to copy and discard.
+
+**Parse-error messages changed again**, as they did in 2.3.4. If you match
+on them in tests, this release will break that. The positions and the
+exception type are unchanged.
 
 ---
 

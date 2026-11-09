@@ -19,7 +19,7 @@ class JsonReaderTest {
 
     Result parse(String text) {
         try (var jr = new JsonReader(new StringReader(text))) {
-            return new Result(jr.read().map(Builder::build).orElseThrow(), null);
+            return new Result(jr.readValue().orElseThrow(), null);
         } catch (Exception e) {
             return new Result(null, e);
         }
@@ -83,7 +83,7 @@ class JsonReaderTest {
         JsonValue result = null;
         Exception ex = null;
         try (var rdr = new JsonReader(new StringReader(src))) {
-            result = rdr.read().map(Builder::build).orElseThrow();
+            result = rdr.readValue().orElseThrow();
         } catch (Exception e) {
             ex = e;
         }
@@ -100,7 +100,7 @@ class JsonReaderTest {
         var source = "{}";
         try (var rdr = new StringReader(source);
              var parser = new JsonReader(rdr)) {
-            var result = parser.read().map(Builder::build).orElseThrow();
+            var result = parser.readValue().orElseThrow();
             assertAll(
                     () -> assertNotNull(result),
                     () -> assertTrue(result instanceof JsonObject(var members) && members.isEmpty())
@@ -113,7 +113,7 @@ class JsonReaderTest {
         var source = "[]";
         try (var rdr = new StringReader(source);
              var parser = new JsonReader(rdr)) {
-            var result = parser.read().map(Builder::build).orElseThrow();
+            var result = parser.readValue().orElseThrow();
             assertAll(
                     () -> assertNotNull(result),
                     () -> assertTrue(result instanceof JsonArray(var elements) && elements.isEmpty())
@@ -126,7 +126,7 @@ class JsonReaderTest {
         var sources = List.of("1", "true", "null", "false", "\"str\"");
         sources.forEach(source -> {
             try (var parser = new JsonReader(new StringReader(source))) {
-                var v = parser.read().map(Builder::build).orElseThrow();
+                var v = parser.readValue().orElseThrow();
                 assertAll(() -> assertInstanceOf(Basic.class, v));
             } catch (IOException e) {
                 assertNull(e);
@@ -140,7 +140,7 @@ class JsonReaderTest {
         sources.forEach(source -> {
             try (var rdr = new StringReader(source);
                  var parser = new JsonReader(rdr)) {
-                var result = parser.read().map(Builder::build).orElseThrow();
+                var result = parser.readValue().orElseThrow();
                 assertAll(
                         () -> assertNotNull(result),
                         () -> assertTrue(result instanceof JsonArray(var elements) && elements.size() == 1)
@@ -155,7 +155,7 @@ class JsonReaderTest {
     void testSingleMemberObject() throws IOException {
         var source = "{\"n\":5}";
         try (var r = new JsonReader(new StringReader(source))) {
-            var o = r.read().map(Builder::build).orElseThrow();
+            var o = r.readValue().orElseThrow();
             assertAll(() -> assertInstanceOf(JsonObject.class, o),
                     () -> assertEquals(1, o instanceof JsonObject(var members) ? members.size() : -1),
                     () -> assertEquals(new JsonObject(Map.of("n", Basic.of(5d))), o)
@@ -167,7 +167,7 @@ class JsonReaderTest {
     void testDualMemberObject() throws Exception {
         var source = "{\"n\":5, \"m\": 7}";
         try (var r = new JsonReader(new StringReader(source))) {
-            r.read().map(Builder::build).orElseThrow();
+            r.readValue().orElseThrow();
         }
     }
 
@@ -175,7 +175,7 @@ class JsonReaderTest {
     void testArrayOfValues() throws IOException {
         String source = "[5, 6, 7, false, null, true, \"str\"]";// "[{\"n\":5}, {\"m\":6}]";
         try (var p = new JsonReader(new StringReader(source))) {
-            var a = p.read().map(Builder::build).orElseThrow();
+            var a = p.readValue().orElseThrow();
             assertAll(
                     () -> assertInstanceOf(JsonArray.class, a),
                     () -> assertEquals(7, a instanceof JsonArray(var elements) ? elements.size() : -1),
@@ -188,7 +188,7 @@ class JsonReaderTest {
     void testArrayOfObject() throws IOException {
         String source = "[{\"n\":55}]";
         try (var p = new JsonReader(new StringReader(source))) {
-            var a = p.read().map(Builder::build).orElseThrow();
+            var a = p.readValue().orElseThrow();
             assertAll(
                     () -> assertInstanceOf(JsonArray.class, a),
                     () -> assertEquals(1, a.elements().size()),
@@ -203,7 +203,7 @@ class JsonReaderTest {
     void testArrayOfTwoObjects() throws IOException {
         String source = "[{\"n\":55}, {\"m\":7}]";
         try (var p = new JsonReader(new StringReader(source))) {
-            var a = p.read().map(Builder::build).orElseThrow();
+            var a = p.readValue().orElseThrow();
             assertAll(
                     () -> assertInstanceOf(JsonArray.class, a),
                     () -> assertEquals(2, a.elements().size()),
@@ -218,7 +218,7 @@ class JsonReaderTest {
     void testNestedObjectDepth1() throws IOException {
         String source = "{\"a\":{\"b\":[]}}";
         try (var p = new JsonReader(new StringReader(source))) {
-            var e = p.read().map(Builder::build).orElseThrow();
+            var e = p.readValue().orElseThrow();
             if (e instanceof JsonObject(var members)) {
                 assertAll(
                         () -> assertEquals(1, members.size()),
@@ -242,14 +242,14 @@ class JsonReaderTest {
     @Test
     void testParseString() throws Exception {
         try (var src = new StringReader("null"); var rdr = new JsonReader(src)) {
-            assertEquals(JsonNull.INSTANCE, rdr.read().map(Builder::build).orElseThrow());
+            assertEquals(JsonNull.INSTANCE, rdr.readValue().orElseThrow());
         }
     }
 
     @Test
     void testParseLarge() throws Exception {
         try (var src = largeFile(); var rdr = new JsonReader(src)) {
-            var result = rdr.read().orElseThrow();
+            var result = rdr.readBuilder().orElseThrow();
             assertNotNull(result);
         }
     }
@@ -274,7 +274,7 @@ class JsonReaderTest {
              var rdr = new InputStreamReader(requireNonNull(is));
              var jr = new JsonReader(rdr))
         {
-            var result = jr.read().orElseThrow();
+            var result = jr.readBuilder().orElseThrow();
             hcSum += result.hashCode();
         }
     }
@@ -285,7 +285,7 @@ class JsonReaderTest {
              var gis = new GZIPInputStream(requireNonNull(is));
              var rdr = new InputStreamReader(gis);
              var jr = new JsonReader(rdr)) {
-            var result = jr.read().orElseThrow();
+            var result = jr.readBuilder().orElseThrow();
             hcSum += result.hashCode();
         }
     }

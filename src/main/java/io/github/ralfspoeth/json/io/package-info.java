@@ -20,13 +20,22 @@
  *
  * <h2>Reading</h2>
  *
- * <p>{@link io.github.ralfspoeth.json.io.JsonReader#read()} returns an
+ * <p>{@link io.github.ralfspoeth.json.io.JsonReader#readValue()} returns an
  * {@link java.util.Optional} that is empty at end of input, so an empty source
- * is not an error — it is the absence of a document. The result is a
- * {@link io.github.ralfspoeth.json.data.Builder}; call {@code build()} for the
- * immutable value, or keep the builder when the next thing you do is edit.
- * That is why {@code Greyson} offers both {@code readValue} and
- * {@code readBuilder}: they differ only in whether that call has happened yet.
+ * is not an error — it is the absence of a document.
+ * {@link io.github.ralfspoeth.json.io.JsonReader#readBuilder()} returns the
+ * same document as a {@link io.github.ralfspoeth.json.data.Builder}, for when
+ * the point of reading is to edit. The parser produces values, so the first is
+ * the direct path and the second converts.
+ * ({@code JsonReader.read()} is the old name for {@code readBuilder} and is
+ * deprecated: it said nothing about what came back.)
+ *
+ * <p>There is no separate tokenizer. A token is control flow rather than an
+ * object, characters arrive in blocks rather than one
+ * {@link java.io.Reader#read()} call each, and partially-built aggregates
+ * live as marks into one flat stack instead of as objects. That is what makes
+ * reading cost roughly what the resulting tree costs, rather than several
+ * times more.
  *
  * <p>A document that is not JSON raises a
  * {@link io.github.ralfspoeth.json.io.JsonParseException} carrying the row and

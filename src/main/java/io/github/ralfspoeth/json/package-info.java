@@ -78,13 +78,20 @@
  * messages are local and self-describing: they never point at a spec, because
  * there is none.
  *
- * <p><b>Not the fastest.</b> Jackson and Gson use bespoke streaming parsers,
- * intern strings and avoid allocation in the hot path; Greyson allocates an
- * algebraic data type per node. If JSON throughput is your bottleneck, use
- * Jackson. If it is not, the simplicity is worth the trade — and the claim is
- * checked rather than asserted, in
+ * <p><b>Not the fastest</b>, though closer than it was. Parsing a 568&nbsp;kB
+ * document into a tree takes about 1.6&nbsp;ms against Jackson's 1.25 and
+ * Gson's 1.41, allocating 3.8&nbsp;MB against 2.1 and 3.2. What is left is
+ * the data model rather than the parser: Jackson binds straight into a record
+ * of {@code int} and {@code String} fields, while Greyson allocates a
+ * {@link io.github.ralfspoeth.json.data.Basic} per scalar and an immutable
+ * map per object — the tree you then query and pattern-match. If JSON
+ * throughput really is your bottleneck, use Jackson.
+ *
+ * <p>Both claims are checked rather than asserted:
+ * <a href="https://github.com/ralfspoeth/json-benchmarks">json-benchmarks</a>
+ * for the numbers, and
  * <a href="https://github.com/ralfspoeth/greyson-competition">greyson-competition</a>,
- * which runs the same schema-less tasks through all three.
+ * which runs the same schema-less tasks through all three, for the rest.
  *
  * <h2>Dependencies</h2>
  *
