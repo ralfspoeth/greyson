@@ -6,7 +6,7 @@ A small, opinionated JSON library for Java.
 <dependency>
     <groupId>io.github.ralfspoeth</groupId>
     <artifactId>greyson</artifactId>
-    <version>2.4.0</version>
+    <version>2.4.1</version>
 </dependency>
 ```
 
@@ -671,6 +671,33 @@ The numbers come from
 [json-benchmarks](https://github.com/ralfspoeth/json-benchmarks), which is
 public and runnable; the comparison on correctness rather than speed lives in
 [greyson-competition](https://github.com/ralfspoeth/greyson-competition).
+
+---
+
+## What's new in 2.4.1
+
+Documentation only; no code changed.
+
+**Fixed: the first snippet in the query package documentation computed
+nothing.** It took `children()` of `periods` — the period *objects* — and
+asked each for `decimal()`, which is empty for anything that is not a
+`JsonNumber`, so every element was filtered out and the average printed
+nothing at all. It was missing the step into `temperature`, which also made
+it shorter than the honest version and so flattered the comparison it exists
+to make.
+
+**New: a snippet for `Shape`.** The query package showed `Pointer` and
+`Selector` and left `Shape` out. It now has one that leads with
+`violations()` — what is wrong and where — rather than with `predicate()`,
+since a boolean is the half that does not distinguish a `Shape` from an
+`if`. The same shape value is then reused to filter, so one malformed
+forecast period costs that period rather than the whole document.
+
+`GreysonWay`, which those snippets are quoted from, now carries assertions
+that the three pipelines agree and that the live document still matches the
+shape. Nothing runs that file — it only has to compile, and it fetches a
+live forecast — so they are enforced only when you run it yourself with
+`-ea`. The header says how.
 
 ---
 
