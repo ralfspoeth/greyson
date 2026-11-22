@@ -64,45 +64,102 @@ void main() throws IOException, InterruptedException {
         // @end region="query"
 
         // @start region="shape"
+        // What this computation needs, and nothing more
+        var requiredShape = member("temperature", number())
+                .and(member("temperatureUnit", oneOf("F", "C")));
+
         // What a forecast period has to look like. Naming a member requires
         // it; optional() is for the ones that may be absent but still have to
         // fit when they are there.
-        var period = member("number", number())
+        var fullPeriodShape = requiredShape.and(member("number", number()))
                 .and(member("name", string()))
-                .and(member("temperature", number()))
-                .and(member("temperatureUnit", oneOf("F", "C")))
                 .and(member("isDaytime", bool()))
                 .and(optional("windSpeed", string()));
 
+        // pointer to periods array...
         var periodsPointer = self()
                 .member("properties")
                 .member("periods");
 
-        var forecast = periodsPointer.must(each(period));
+        // ...composed into a shape
+        var forecastShape = periodsPointer.must(each(fullPeriodShape));
 
         // explain() prints the description back, so the rule can be logged
         // or asserted rather than only applied
-        IO.println(forecast.explain());
+        IO.println(forecastShape.explain());
 
         var doc = Greyson.readValue(Reader.of(response.body()));
 
         // The diagnostic use: what is wrong, and where. An empty stream means
         // the document is fine, so this prints nothing on a good day.
-        var defects = doc.stream().flatMap(forecast::violations).toList();
+        var defects = doc.stream().flatMap(forecastShape::violations).toList();
         defects.forEach(IO::println);
         // properties/periods/[3]/temperature: expected number, got string
         // properties/periods/[7]/name: missing required member
 
-        // The same value as a filter: keep the periods that are usable and
-        // average those, instead of failing on the whole document because one
-        // period is malformed.
-        var usableAverage = doc.stream()
-                .flatMap(periodsPointer.select(all().where(period))
-                        .point(self().member("temperature"))
-                        .presentValues(JsonValue::decimal))
-                .mapToInt(BigDecimal::intValue)
-                .average();
-        usableAverage.ifPresent(IO::println);
+        enum Unit {F, C}
+        record Temperature(BigDecimal temperature, Unit unit) {
+            Temperature withUnit(Unit newUnit) {
+                if (unit == newUnit) {
+                    return this;
+                } else return switch (newUnit) {
+                    case F -> new Temperature(temperature
+                            .divide(BigDecimal.TEN, MathContext.UNLIMITED)
+                            .multiply(BigDecimal.valueOf(18))
+                            .add(BigDecimal.valueOf(32)),
+                            Unit.F
+                    );
+                    case C -> new Temperature(temperature
+                            .add(BigDecimal.valueOf(-32))
+                            .multiply(BigDecimal.valueOf(5))
+                            .divide(BigDecimal.valueOf(9), 4, RoundingMode.HALF_EVEN),
+                            Unit.C
+                    );
+                };
+            }
+
+            Temperature add(Temperature other) {
+                return new Temperature(temperature.add(other.withUnit(this.unit).temperature()), unit);
+            }
+
+            Temperature divide(long div) {
+                return new Temperature(temperature
+                        .divide(BigDecimal.valueOf(div), 4, RoundingMode.HALF_EVEN),
+                        unit
+                );
+            }
+        }
+
+        var temperaturePtr = self().member("temperature");
+        var unitPtr = self().member("temperatureUnit");
+
+        // A shape as a filter, and a narrower one than the shape above: the
+        // full contract is what the forecast promises, requiredShape is only
+        // what this calculation reads. One malformed period costs that
+        // period, not the document.
+        //
+        // And because every survivor satisfied requiredShape, the members are
+        // known to be present and of the right type -- which is what makes
+        // the OrThrow accessors honest here rather than optimistic.
+        var temperatures = doc.stream()
+                .flatMap(periodsPointer.select(all().where(requiredShape)))
+                .map(p -> new Temperature(
+                        temperaturePtr.decimalOrThrow(p),
+                        Unit.valueOf(unitPtr.stringOrThrow(p))))
+                .toList();
+
+        temperatures.forEach(IO::println);
+        // Temperature[temperature=54, unit=F]
+
+        // Summed as Temperatures rather than as numbers: add() settles the
+        // unit, and nothing is truncated on the way. Division is the one
+        // operation that has to be told a precision -- which is the price of
+        // BigDecimal, and the reason the digits survived this far.
+        var meanTemperature = temperatures.stream()
+                .reduce(Temperature::add)
+                .map(sum -> sum.divide(temperatures.size()));
+        meanTemperature.ifPresent(IO::println);
+        // Temperature[temperature=56.4286, unit=F]
         // @end region="shape"
 
         /*
@@ -122,9 +179,13 @@ void main() throws IOException, InterruptedException {
         // api.weather.gov changed and the snippet needs revisiting
         assert defects.isEmpty() : "forecast no longer matches the shape: " + defects;
 
-        // and with nothing filtered out, the shape-guarded average is the
-        // same number arrived at a third way
-        assert usableAverage.equals(queryAverage)
-                : "usable " + usableAverage + " != query " + queryAverage;
+        // And with nothing filtered out, the shape-guarded mean is the same
+        // number arrived at a third way -- within a tolerance, because the
+        // other two truncate each reading to an int while this one keeps the
+        // decimals and rounds once, at the end.
+        assert meanTemperature.isPresent() : "no usable periods";
+        assert Math.abs(meanTemperature.orElseThrow().temperature().doubleValue()
+                - queryAverage.orElseThrow()) < 0.01
+                : "mean " + meanTemperature + " != query " + queryAverage;
     }
 }
