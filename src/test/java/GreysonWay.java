@@ -90,13 +90,6 @@ void main() throws IOException, InterruptedException {
 
         var doc = Greyson.readValue(Reader.of(response.body()));
 
-        // The diagnostic use: what is wrong, and where. An empty stream means
-        // the document is fine, so this prints nothing on a good day.
-        var defects = doc.stream().flatMap(forecastShape::violations).toList();
-        defects.forEach(IO::println);
-        // properties/periods/[3]/temperature: expected number, got string
-        // properties/periods/[7]/name: missing required member
-
         enum Unit {F, C}
         record Temperature(BigDecimal temperature, Unit unit) {
             Temperature withUnit(Unit newUnit) {
@@ -148,9 +141,6 @@ void main() throws IOException, InterruptedException {
                         Unit.valueOf(unitPtr.stringOrThrow(p))))
                 .toList();
 
-        temperatures.forEach(IO::println);
-        // Temperature[temperature=54, unit=F]
-
         // Summed as Temperatures rather than as numbers: add() settles the
         // unit, and nothing is truncated on the way. Division is the one
         // operation that has to be told a precision -- which is the price of
@@ -158,8 +148,17 @@ void main() throws IOException, InterruptedException {
         var meanTemperature = temperatures.stream()
                 .reduce(Temperature::add)
                 .map(sum -> sum.divide(temperatures.size()));
-        meanTemperature.ifPresent(IO::println);
+
+        // And this is what a Shape is for. If no period was usable there is
+        // no mean, and violations() says why -- with a path to each defect,
+        // which is the part a boolean could never tell you.
+        meanTemperature.ifPresentOrElse(IO::println, () -> IO.println(
+                doc.stream().flatMap(forecastShape::violations).toList())
+        );
         // Temperature[temperature=56.4286, unit=F]
+        // ...or, when there is nothing to average:
+        // [properties/periods/[3]/temperature: expected number, got string,
+        //  properties/periods/[7]/temperature: missing required member]
         // @end region="shape"
 
         /*
@@ -175,8 +174,11 @@ void main() throws IOException, InterruptedException {
         assert classicAverage.equals(queryAverage)
                 : "classic " + classicAverage + " != query " + queryAverage;
 
-        // the live document should match the shape; if it stops doing so,
-        // api.weather.gov changed and the snippet needs revisiting
+        // The live document should match the full contract. The snippet only
+        // asks for violations when it has nothing to average, so this is the
+        // one place they are checked on a good day -- and if it ever fails,
+        // api.weather.gov changed and the snippet needs revisiting.
+        var defects = doc.stream().flatMap(forecastShape::violations).toList();
         assert defects.isEmpty() : "forecast no longer matches the shape: " + defects;
 
         // And with nothing filtered out, the shape-guarded mean is the same

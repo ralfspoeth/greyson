@@ -6,7 +6,7 @@ A small, opinionated JSON library for Java.
 <dependency>
     <groupId>io.github.ralfspoeth</groupId>
     <artifactId>greyson</artifactId>
-    <version>2.4.1</version>
+    <version>2.4.2</version>
 </dependency>
 ```
 
@@ -671,6 +671,32 @@ The numbers come from
 [json-benchmarks](https://github.com/ralfspoeth/json-benchmarks), which is
 public and runnable; the comparison on correctness rather than speed lives in
 [greyson-competition](https://github.com/ralfspoeth/greyson-competition).
+
+---
+
+## What's new in 2.4.2
+
+Documentation only; no code changed. The `Shape` snippet in the query package
+is rewritten around what the three pieces are actually for.
+
+**Two shapes, two jobs.** The full period shape is what the forecast
+*promises* and is what `violations()` reports against; a narrower one —
+`temperature` and its unit — is what this particular calculation *reads*, and
+is what `Selector.where` filters on. Validating against the contract while
+filtering on the narrow one is the honest split, and one shape doing both
+hid it.
+
+**`violations()` where it earns its keep.** It used to be printed for its own
+sake, which prints nothing on a good day. It is now the `orElse` of the
+calculation: if no period was usable there is no mean, and the violations say
+why, with a path to each defect — the part a boolean could never tell you.
+
+**And a mapping, to show what a `Shape` is not.** The survivors of the filter
+are known to carry a numeric temperature and an `F`-or-`C` unit, which is
+what makes `decimalOrThrow` and `stringOrThrow` honest rather than
+optimistic. They map into a small record, and the string-to-enum step is
+exactly the kind of thing no shape could express — so the snippet now shows,
+rather than asserts, why `Shape` does not become a record mapper.
 
 ---
 
